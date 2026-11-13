@@ -1,5 +1,6 @@
 import * as CANNON from 'cannon-es';
-import { nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, curbGeometry, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { TerrainField } from './terrain';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
 export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number }
@@ -9,6 +10,10 @@ export class KartPhysics {
   vehicle:CANNON.RaycastVehicle;
   track!:TrackData;
   barriers:CANNON.Body[]=[];
+  terrain=new TerrainField();
+  terrainBody:CANNON.Body|null=null;
+  roadBody:CANNON.Body|null=null;
+  curbBody:CANNON.Body|null=null;
   telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0};
   input:DriveInput={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   gripMultiplier=1;
@@ -26,7 +31,7 @@ export class KartPhysics {
     this.world.defaultContactMaterial.restitution=.08;
     const groundMaterial=new CANNON.Material('ground');const chassisMaterial=new CANNON.Material('kart');
     this.world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:.25,restitution:.1,contactEquationStiffness:1e7}));
-    const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);
+    const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);
     this.body=new CANNON.Body({mass:165,material:chassisMaterial,linearDamping:.025,angularDamping:.4});
     this.body.addShape(new CANNON.Box(new CANNON.Vec3(.70,.16,1.08)),new CANNON.Vec3(0,.02,0));
     this.body.allowSleep=false;
@@ -35,25 +40,28 @@ export class KartPhysics {
     for(const [x,z] of [[-.81,-.83],[.81,-.83],[-.84,.79],[.84,.79]])this.vehicle.addWheel({...wheel,chassisConnectionPointLocal:new CANNON.Vec3(x,0,z),isFrontWheel:z<0});
     this.vehicle.addToWorld(this.world);
   }
-  setTrack(track:TrackData,settings:TrackSettings){
+  setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField()){
     this.track=track;
     for(const b of this.barriers)this.world.removeBody(b);this.barriers=[];
-    if(settings.barriers){
-      const samples=track.samples; const stride=3;
-      for(const side of [-1,1])for(let i=0;i<samples.length;i+=stride){
-        const a=samples[i],b=samples[(i+stride)%samples.length],offset=track.width/2+1.55;
-        const ax=a.x+a.nx*offset*side,az=a.z+a.nz*offset*side,bx=b.x+b.nx*offset*side,bz=b.z+b.nz*offset*side;
-        const len=Math.hypot(bx-ax,bz-az);
-        const body=new CANNON.Body({mass:0,shape:new CANNON.Box(new CANNON.Vec3(.26,.38,len/2+.08)),position:new CANNON.Vec3((ax+bx)/2,.38,(az+bz)/2)});
-        body.quaternion.setFromEuler(0,Math.atan2(bx-ax,bz-az),0);body.updateAABB();this.world.addBody(body);this.barriers.push(body);
-      }
+    if(this.terrainBody)this.world.removeBody(this.terrainBody);if(this.roadBody)this.world.removeBody(this.roadBody);this.roadBody=null;
+    if(this.curbBody)this.world.removeBody(this.curbBody);this.curbBody=null;
+    this.terrain=terrain.clone();const f=this.terrain,n=f.resolution;
+    const data=Array.from({length:n},(_,x)=>Array.from({length:n},(_,j)=>f.heights[(n-1-j)*n+x]));
+    const heightfield=new CANNON.Heightfield(data,{elementSize:f.cellSize});
+    this.terrainBody=new CANNON.Body({mass:0,shape:heightfield,position:new CANNON.Vec3(f.originX,0,f.originZ+f.size)});this.terrainBody.quaternion.setFromEuler(-Math.PI/2,0,0);this.terrainBody.updateAABB();this.world.addBody(this.terrainBody);
+    if(track.bridges.length){
+      const vertices:number[]=[],indices:number[]=[],count=track.samples.length;
+      for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const x=s.x+s.nx*track.width*.5*side,z=s.z+s.nz*track.width*.5*side;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
+      for(let i=0;i<count;i++){const a=i*2,b=((i+1)%count)*2;indices.push(a,a+1,b,a+1,b+1,b);}
+      const mesh=new CANNON.Trimesh(vertices,indices);this.roadBody=new CANNON.Body({mass:0,shape:mesh});this.roadBody.updateAABB();this.world.addBody(this.roadBody);
     }
+    if(_settings.curbs){const data=curbGeometry(track,(x,z)=>f.sample(x,z));if(data.vertices.length){this.curbBody=new CANNON.Body({mass:0});for(let start=0;start<data.vertices.length/3;start+=14000){const end=Math.min(start+14000,data.vertices.length/3),vertices=data.vertices.slice(start*3,end*3),indices=data.indices.filter((_,i,all)=>all[Math.floor(i/3)*3]>=start&&all[Math.floor(i/3)*3]<end).map(i=>i-start);this.curbBody.addShape(new CANNON.Trimesh(vertices,indices));}this.curbBody.updateAABB();this.world.addBody(this.curbBody);}}
     this.reset();
   }
   reset(index=0){
     if(!this.track)return;
     const s=this.track.samples[Math.max(0,index)%this.track.samples.length];
-    this.body.position.set(s.x,.72,s.z);this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
+    this.body.position.set(s.x,this.terrain.sample(s.x,s.z)+bridgeHeight(this.track,index)+.72,s.z);this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
     this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();
     this.body.previousPosition.copy(this.body.position);this.body.interpolatedPosition.copy(this.body.position);this.body.previousQuaternion.copy(this.body.quaternion);this.body.interpolatedQuaternion.copy(this.body.quaternion);
     this.body.aabbNeedsUpdate=true;this.body.wakeUp();this.steer=0;this.lastForward=0;this.lastLateral=0;this.accumulator=0;
@@ -90,7 +98,7 @@ export class KartPhysics {
     b.applyForce(this.forward.scale(-Math.sign(speed)*drag));
     this.world.step(dt);
     this.telemetry.speed=Math.hypot(b.velocity.x,b.velocity.z)*3.6;this.telemetry.signedSpeed=speed*3.6;
-    this.telemetry.rpm=1600+Math.min(1,abs/26)*9000+this.input.throttle*500;
+    this.telemetry.rpm=1500+Math.min(1,abs/26)*2600+this.input.throttle*350;
     this.telemetry.steering=this.steer;this.telemetry.offroad=offroad;
     const lat=(sideSpeed-this.lastLateral)/dt/9.81+speed*b.angularVelocity.y/9.81;
     this.telemetry.lateralG+=(Math.max(-2.5,Math.min(2.5,lat))-this.telemetry.lateralG)*.045;

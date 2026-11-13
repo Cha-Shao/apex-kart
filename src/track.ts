@@ -1,11 +1,15 @@
 import * as THREE from 'three';
+import { parseTerrain, type TerrainData } from './terrain';
 
 export interface Point { x: number; z: number }
 export type SegmentKind = 'straight' | 'curve' | 'hairpin';
 export interface TrackSample extends Point { tx: number; tz: number; nx: number; nz: number; curvature: number; kind: SegmentKind; distance: number }
-export interface TrackData { controls: Point[]; samples: TrackSample[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
+export interface TrackData { controls: Point[]; samples: TrackSample[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
+export interface Bridge { index:number;otherIndex:number;distance:number;height:number;halfLength:number }
+export interface BuildOptions { preserveLayout?:boolean;allowCrossings?:boolean }
+export interface RouteMetadata {circuitId:string;scale:'native'|'compact'}
 export interface TrackSettings { width: number; smoothness: number; curbs: boolean; barriers: boolean }
-export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:60, curbs:true, barriers:true };
+export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:60, curbs:true, barriers:false };
 export const PRESETS: { id:string; name:string; subtitle:string; points:Point[] }[] = [
   {id:'club',name:'海岸俱乐部',subtitle:'CLUB CIRCUIT',points:[{x:-117,z:80},{x:-45,z:80},{x:45,z:80},{x:119,z:77},{x:145,z:58},{x:144,z:25},{x:125,z:7},{x:79,z:4},{x:65,z:-14},{x:77,z:-34},{x:126,z:-37},{x:143,z:-58},{x:135,z:-86},{x:107,z:-99},{x:20,z:-101},{x:-62,z:-101},{x:-108,z:-92},{x:-130,z:-67},{x:-124,z:-41},{x:-91,z:-24},{x:-52,z:-27},{x:-30,z:-11},{x:-29,z:12},{x:-52,z:29},{x:-110,z:29},{x:-134,z:47},{x:-136,z:65}]},
   {id:'flow',name:'流线公园',subtitle:'FLOW PARK',points:[{x:-128,z:60},{x:-55,z:81},{x:30,z:79},{x:111,z:62},{x:143,z:29},{x:128,z:-7},{x:63,z:-23},{x:47,z:-63},{x:10,z:-92},{x:-55,z:-87},{x:-85,z:-51},{x:-65,z:-12},{x:-103,z:8},{x:-139,z:30}]},
@@ -41,17 +45,17 @@ function segmentsCross(a:Point,b:Point,c:Point,d:Point) {
   const cross=(p:Point,q:Point,r:Point)=>(q.x-p.x)*(r.z-p.z)-(q.z-p.z)*(r.x-p.x);
   return cross(a,b,c)*cross(a,b,d)<-1e-5&&cross(c,d,a)*cross(c,d,b)<-1e-5;
 }
-export function buildTrack(raw:Point[],settings:TrackSettings):TrackData {
+export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptions={}):TrackData {
   if(!Number.isFinite(settings.width)||settings.width<6||settings.width>18)throw new Error('赛道宽度应在 6–18 米之间。');
-  const controls=prepareStroke(raw);
-  const curve=new THREE.CatmullRomCurve3(smoothClosed(controls,settings.smoothness).map(p=>new THREE.Vector3(p.x,0,p.z)),true,'centripetal');
-  curve.arcLengthDivisions=4096;
+  const controls=options.preserveLayout?raw.map(p=>({...p})):prepareStroke(raw);
+  const curve=new THREE.CatmullRomCurve3((options.preserveLayout?controls:smoothClosed(controls,settings.smoothness)).map(p=>new THREE.Vector3(p.x,0,p.z)),true,'centripetal');
+  curve.arcLengthDivisions=Math.max(4096,controls.length*4);
   const length=curve.getLength();
   if(length<130)throw new Error('赛道太短，请画一个更大的闭合环线。');
-  const n=Math.max(128,Math.ceil(length/1.6));
+  const n=Math.min(4000,Math.max(128,Math.ceil(length/1.6)));
   const positions=curve.getSpacedPoints(n).slice(0,-1);
-  // Reject intersecting centre lines: an overpass would require a different collision mesh.
-  for(let i=0;i<n;i++)for(let j=i+3;j<n;j++){if(i===0&&j===n-1)continue;if(segmentsCross(positions[i],positions[(i+1)%n],positions[j],positions[(j+1)%n]))throw new Error('赛道发生交叉了，请画一条不交叉的闭合环线。');}
+  const crossings:{i:number;j:number}[]=[];
+  for(let i=0;i<n;i++)for(let j=i+3;j<n;j++){if(i===0&&j===n-1)continue;if(segmentsCross(positions[i],positions[(i+1)%n],positions[j],positions[(j+1)%n])){if(!options.allowCrossings)throw new Error('赛道发生交叉了，请画一条不交叉的闭合环线。');if(!crossings.some(c=>Math.abs(c.i-i)<5&&Math.abs(c.j-j)<5))crossings.push({i,j});}}
   const step=length/n;
   const samples:TrackSample[]=positions.map((p,i)=>{
     const prev=positions[(i-3+n)%n],next=positions[(i+3)%n];const dx=next.x-prev.x,dz=next.z-prev.z,l=Math.hypot(dx,dz);
@@ -63,13 +67,18 @@ export function buildTrack(raw:Point[],settings:TrackSettings):TrackData {
   samples.forEach(s=>s.kind=Math.abs(s.curvature)>.034?'hairpin':Math.abs(s.curvature)>.009?'curve':'straight');
   // A near-miss between distant sections must have space for both road edges.
   const neighborSkip=Math.ceil((settings.width*2.2)/step);
-  for(let i=0;i<n;i+=3)for(let j=i+neighborSkip;j<n;j+=3){if(n-j+i<neighborSkip)continue;if(distance(samples[i],samples[j])<settings.width+1.5)throw new Error('两段赛道靠得太近，请拉开距离或减小路宽。');}
+  if(!options.preserveLayout)for(let i=0;i<n;i+=3)for(let j=i+neighborSkip;j<n;j+=3){if(n-j+i<neighborSkip)continue;if(distance(samples[i],samples[j])<settings.width+1.5)throw new Error('两段赛道靠得太近，请拉开距离或减小路宽。');}
   let corners=0,hairpins=0,inCorner=false,hasHairpin=false,sign=0;
   const offset=samples.findIndex(s=>s.kind==='straight');
   for(let k=0;k<=n;k++){const s=samples[(k+Math.max(0,offset))%n];const turn=Math.sign(s.curvature);if(s.kind!=='straight'){if(!inCorner||turn!==sign){if(inCorner&&hasHairpin)hairpins++;corners++;hasHairpin=false;}inCorner=true;sign=turn;hasHairpin ||= s.kind==='hairpin';}else{if(inCorner&&hasHairpin)hairpins++;inCorner=false;hasHairpin=false;}}
   const xs=samples.map(s=>s.x),zs=samples.map(s=>s.z);
-  return {controls,samples,length,width:settings.width,corners,hairpins,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
+  const bridges:Bridge[]=crossings.slice(0,8).map(c=>({index:c.j,otherIndex:c.i,distance:c.j*step,height:5.2,halfLength:Math.min(length*.06,Math.max(42,settings.width*6))}));
+  return {controls,samples,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
 }
+
+export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
+
+export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[],colors:number[]=[];const n=track.samples.length;for(const side of [-1,1])for(let i=0;i<n;i++){if(Math.abs(track.samples[i].curvature)<.009)continue;const base=vertices.length/3;for(const k of [i,(i+1)%n])for(let j=0;j<=6;j++){const s=track.samples[k],u=j/6,offset=side*(track.width/2+u*.94),x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.025+Math.sin(u*Math.PI)*.12,z);const red=Math.floor(track.samples[i].distance/2.15)%2===0;colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));}for(let j=0;j<6;j++){const a=base+j,b=a+7;if(side===1)indices.push(a,a+1,b,a+1,b+1,b);else indices.push(a,b,a+1,a+1,b,b+1);}}return {vertices,indices,colors};}
 
 export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:number;signedDistance:number;sample:TrackSample} {
   let best=Infinity,index=0,signedDistance=0;
@@ -77,14 +86,16 @@ export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:n
   return {index,distance:Math.sqrt(best),signedDistance,sample:track.samples[index]};
 }
 
-export interface TrackFile { version:1; name:string; points:Point[]; settings:TrackSettings }
+export interface TrackFile { version:1|2; name:string; points:Point[]; settings:TrackSettings;terrain?:TerrainData;route?:RouteMetadata }
 export function parseTrackFile(text:string):TrackFile {
   const v=JSON.parse(text);
-  if(v.version!==1||!Array.isArray(v.points)||v.points.length<5||v.points.length>4000)throw new Error('不支持的赛道文件。请导入 APEX 导出的 JSON。');
-  if(v.points.some((p:any)=>!Number.isFinite(p.x)||!Number.isFinite(p.z)||Math.abs(p.x)>230||Math.abs(p.z)>170))throw new Error('赛道坐标超出了画布范围。');
+  if(![1,2].includes(v.version)||!Array.isArray(v.points)||v.points.length<5||v.points.length>10000)throw new Error('不支持的赛道文件。请导入 APEX 导出的 JSON。');
+  if(v.points.some((p:any)=>!Number.isFinite(p.x)||!Number.isFinite(p.z)||Math.abs(p.x)>20000||Math.abs(p.z)>20000))throw new Error('赛道坐标超出了画布范围。');
   const settings={...DEFAULT_SETTINGS,...v.settings};
   const width=Number(settings.width),smoothness=Number(settings.smoothness);
-  settings.width=Math.max(6,Math.min(18,Number.isFinite(width)?width:10));settings.smoothness=Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:60));settings.curbs=!!settings.curbs;settings.barriers=!!settings.barriers;
-  buildTrack(v.points,settings);
-  return {version:1,name:String(v.name||'我的赛道').slice(0,40),points:v.points,settings};
+  settings.width=Math.max(6,Math.min(18,Number.isFinite(width)?width:10));settings.smoothness=Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:60));settings.curbs=!!settings.curbs;settings.barriers=false;
+  const route=v.route&&typeof v.route.circuitId==='string'&&['native','compact'].includes(v.route.scale)?{circuitId:v.route.circuitId.slice(0,80),scale:v.route.scale} as RouteMetadata:undefined;
+  buildTrack(v.points,settings,route?{preserveLayout:true,allowCrossings:true}:{});
+  const terrain=v.terrain?parseTerrain(v.terrain).toJSON():undefined;
+  return {version:2,name:String(v.name||'我的赛道').slice(0,40),points:v.points,settings,terrain,route};
 }

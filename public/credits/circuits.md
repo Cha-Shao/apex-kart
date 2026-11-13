@@ -1,0 +1,36 @@
+# APEX 真实赛道库：来源和许可
+
+核实日期：2026-11-14。此游戏与 Formula 1、FIA、各赛道及数据作者没有隶属或背书关系。
+
+## 2026 赛历
+
+- 当前正式赛历 23 站：https://www.formula1.com/en/racing/2026
+- 巴林大奖赛于 2026 年 10 月 2–4 日改在马来西亚雪邦举办，官方公告：https://www.formula1.com/en/latest/article/formula-1-and-fia-confirm-malaysia-will-join-the-2026-calendar-as-host-venue-for-bahrain-grand-prix.6lL7vjFEM2VVynRHvg1TCf
+- 萨基尔和吉达的原定四月比赛取消。库中仍保留这两条原定赛道，并单独标识，不计入当前 23 站。
+- 正式赛道长度从各站 Formula1.com 2026 比赛页核对。原定萨基尔、吉达参考开源赛道数据。北环参考 Nürburgring 官方 20.832 km 完整圈定义：https://www.nuerburgring.de/info/nuerburgring/race-tracks/nordschleife
+
+## F1 赛道线形
+
+原始 GeoJSON：Tomislav Bacinger，`bacinger/f1-circuits`，MIT 许可。
+
+- 仓库：https://github.com/bacinger/f1-circuits
+- 固定版本：`8094e957b8d6aa8b9f4510c93968556cccd30e02`
+- 原始数据：https://github.com/bacinger/f1-circuits/blob/8094e957b8d6aa8b9f4510c93968556cccd30e02/f1-circuits.geojson
+- 许可全文：[/licenses/f1-circuits-MIT.txt](/licenses/f1-circuits-MIT.txt)
+
+这些开源线路是地图轮廓近似，不是官方测绘或激光扫描。项目把经纬度投影为本地米制坐标，等比校正使折线周长符合已核对的赛道长度，再平移到画布中心。原尺寸模式保留这一米制比例；卡丁车模式另外等比缩放到 380 × 260 米范围。后续曲线平滑可能使实际游戏路面长度稍有变化。
+
+马德里、部分赛道改造和路缘细节可能与地图源不同。赛道中心线数据不包含真实逐点海拔、横向倾角、围墙、缓冲区或建筑。铃鹿的上跨位置是中心线交叉点，上下层标识依据实际赛道行驶顺序。
+
+## 纽博格林北环
+
+© OpenStreetMap contributors，Open Database License（ODbL）1.0。
+
+- 版权和署名：https://www.openstreetmap.org/copyright
+- 许可：https://opendatacommons.org/licenses/odbl/1-0/
+- 数据入口：https://api.openstreetmap.org/api/0.6/map
+- 快照：2026-11-14；使用完整北环路线各 raceway 的原始 node 坐标，排除 GP 赛道、维修区和 24 小时连接线。
+- 起终点参考 OSM T13 路段：https://www.openstreetmap.org/way/41395670
+- 本项目使用的派生路线数据库（ODbL）：[/data/nordschleife-centreline.geojson](/data/nordschleife-centreline.geojson)
+
+地理线形闭合形成完整北环。这里的五处 OSM bridge 标记主要跨越普通道路，北环中心线本身没有二维自交。不要把这些桥段误解为五处赛道对赛道交叉。逐点真实海拔并未包含在此线形文件中。

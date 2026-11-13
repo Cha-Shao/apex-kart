@@ -1,12 +1,15 @@
 export class EngineAudio {
   private context:AudioContext|null=null;
-  private oscillator:OscillatorNode|null=null;
-  private harmonics:OscillatorNode|null=null;
-  private gain:GainNode|null=null;
+  private engine:AudioWorkletNode|null=null;
+  private loading:Promise<void>|null=null;
   enabled=false;
-  async toggle(){
-    if(!this.context){this.context=new AudioContext();this.gain=this.context.createGain();this.gain.gain.value=0;const filter=this.context.createBiquadFilter();filter.type='lowpass';filter.frequency.value=650;this.gain.connect(filter);filter.connect(this.context.destination);this.oscillator=this.context.createOscillator();this.oscillator.type='sawtooth';this.oscillator.connect(this.gain);this.oscillator.start();this.harmonics=this.context.createOscillator();this.harmonics.type='triangle';this.harmonics.connect(this.gain);this.harmonics.start();}
-    await this.context.resume();this.enabled=!this.enabled;return this.enabled;
+  get ready(){return !!this.engine;}
+  get state(){return this.context?.state??'closed';}
+  private async initialize(){
+    if(this.engine)return;if(this.loading)return this.loading;
+    this.loading=(async()=>{this.context??=new AudioContext();await this.context.audioWorklet.addModule('/audio/engine-worklet.js');this.engine=new AudioWorkletNode(this.context,'kart-200cc',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});const compressor=this.context.createDynamicsCompressor();compressor.threshold.value=-16;compressor.knee.value=16;compressor.ratio.value=4;compressor.attack.value=.004;compressor.release.value=.15;const filter=this.context.createBiquadFilter();filter.type='lowpass';filter.frequency.value=4200;this.engine.connect(filter);filter.connect(compressor);compressor.connect(this.context.destination);})();try{await this.loading;}catch(e){this.loading=null;throw e;}
   }
-  update(rpm:number,throttle:number,running:boolean){if(!this.context||!this.gain||!this.oscillator||!this.harmonics)return;const t=this.context.currentTime;this.oscillator.frequency.setTargetAtTime(28+rpm/74,t,.07);this.harmonics.frequency.setTargetAtTime(14+rpm/148,t,.08);this.gain.gain.setTargetAtTime(this.enabled&&running?.018+throttle*.012:0,t,.1);}
+  async setEnabled(enabled:boolean){if(enabled){this.context??=new AudioContext();await this.context.resume();await this.initialize();}this.enabled=enabled;this.engine?.port.postMessage({enabled,running:false});return enabled;}
+  async toggle(){return this.setEnabled(!this.enabled);}
+  update(rpm:number,throttle:number,running:boolean){this.engine?.port.postMessage({rpm:Math.max(1450,Math.min(4600,rpm)),throttle,running,enabled:this.enabled});}
 }

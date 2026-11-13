@@ -1,0 +1,20 @@
+.reference-image-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.reference-image-controls input[type="file"] {
+  max-width: 15rem;
+}
+
+.reference-image-opacity-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.reference-image-opacity-label input[type="range"] {
+  width: 7rem;
+}

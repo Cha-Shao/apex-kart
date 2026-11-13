@@ -26,5 +26,5 @@ test('import/export preserves the track and rejects malformed geometry',()=>{
   const parsed=parseTrackFile(JSON.stringify(file));assert.equal(parsed.name,file.name);assert.equal(buildTrack(parsed.points,parsed.settings).length,buildTrack(file.points,file.settings).length);
   assert.equal(parseTrackFile(JSON.stringify({...file,settings:{...DEFAULT_SETTINGS,smoothness:0}})).settings.smoothness,0);
   assert.throws(()=>parseTrackFile('{"version":2,"points":[]}'),/不支持/);
-  assert.throws(()=>parseTrackFile(JSON.stringify({...file,points:[...file.points,{x:9000,z:0}]})),/超出/);
+  assert.throws(()=>parseTrackFile(JSON.stringify({...file,points:[...file.points,{x:90000,z:0}]})),/超出/);
 });
