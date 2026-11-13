@@ -44,7 +44,7 @@ export class GameScene {
     this.camera.position.set(260,290,340);this.orbit=new OrbitControls(this.camera,this.renderer.domElement);this.orbit.enableDamping=true;this.orbit.dampingFactor=.065;this.orbit.maxPolarAngle=Math.PI/2-.08;this.orbit.minDistance=5;this.orbit.maxDistance=700;this.orbit.target.set(0,0,-8);
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
   }
-  resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();}
+  resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.track&&this.mode==='orbit')this.frameTrack();}
   private clearGroup(group:THREE.Group){group.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.map)m.map.dispose();m.dispose();}}});group.clear();}
   private ribbon(track:TrackData,offset:number,width:number,y:number,color:number,filter?:(i:number)=>boolean){
     const positions:number[]=[],indices:number[]=[],n=track.samples.length;
@@ -126,10 +126,11 @@ export class GameScene {
   }
   frameTrack(){
     if(!this.track)return;const b=this.track.bounds;const center=new THREE.Vector3((b.minX+b.maxX)/2,0,(b.minZ+b.maxZ)/2);
-    const size=Math.max(b.maxX-b.minX,(b.maxZ-b.minZ)*1.35);const aspect=Math.max(.5,this.camera.aspect),scale=aspect<1.4?1.4/aspect:1;
+    const size=Math.max(b.maxX-b.minX,(b.maxZ-b.minZ)*1.35);const aspect=Math.max(.4,this.camera.aspect),scale=Math.max(1,1.1/aspect);
     this.orbit.target.copy(center);this.camera.position.copy(center).add(new THREE.Vector3(size*.57*scale,size*.90*scale,size*.94*scale));this.camera.lookAt(center);this.orbit.update();
+    const fog=this.scene.fog as THREE.Fog,range=this.camera.position.distanceTo(center);fog.near=Math.max(450,range*.95);fog.far=Math.max(1000,range*2.5);
   }
-  setCamera(mode:CameraMode){this.mode=mode;this.camera.near=mode==='cockpit'?.08:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();}
+  setCamera(mode:CameraMode){this.mode=mode;this.camera.near=mode==='cockpit'?.08:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.Fog;fog.near=400;fog.far=950;}}
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
