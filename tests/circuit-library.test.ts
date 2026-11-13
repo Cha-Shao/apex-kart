@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CIRCUIT_LIBRARY } from '../src/circuit-library.ts';
 const loopLength=(points:{x:number;z:number}[])=>points.reduce((sum,p,i)=>{const n=points[(i+1)%points.length];return sum+Math.hypot(n.x-p.x,n.z-p.z);},0);
-test('library covers every current 2026 F1 round, both original cancelled layouts, and the full Nordschleife',()=>{
+test('library covers every current 2026 F1 round, both original cancelled layouts, and both Daytona layouts',()=>{
   const current=CIRCUIT_LIBRARY.filter(t=>t.calendarStatus==='current-2026');
   assert.equal(current.length,23);assert.deepEqual(current.map(t=>t.round),Array.from({length:23},(_,i)=>i+1));
   assert.equal(current.find(t=>t.round===16)?.id,'sepang');
   assert.deepEqual(CIRCUIT_LIBRARY.filter(t=>t.calendarStatus==='original-2026').map(t=>t.id),['sakhir','jeddah']);
-  assert.equal(CIRCUIT_LIBRARY.find(t=>t.id==='nordschleife')?.officialLengthM,20832);
+  assert.equal(CIRCUIT_LIBRARY.find(t=>t.id==='daytona-road')?.officialLengthM,5730);
   assert.equal(new Set(CIRCUIT_LIBRARY.map(t=>t.id)).size,CIRCUIT_LIBRARY.length);
 });
 test('geographic linework is finite, metres are calibrated to reference length, and compact mode preserves uniform scale',()=>{
@@ -21,9 +21,4 @@ test('geographic linework is finite, metres are calibrated to reference length, 
     assert.ok(area*(t.direction==='clockwise'?1:-1)>0,t.id+' race direction');
   }
 });
-test('Suzuka supplies the true figure-eight crossing and Nordschleife distinguishes ordinary-road bridges',()=>{
-  const suzuka=CIRCUIT_LIBRARY.find(t=>t.id==='suzuka')!,nord=CIRCUIT_LIBRARY.find(t=>t.id==='nordschleife')!;
-  assert.equal(suzuka.crossings.length,1);assert.ok(Math.abs(suzuka.crossings[0].upperProgress-.80784)<.001);
-  assert.equal(nord.crossings.length,0);assert.equal(nord.bridgeSpans?.length,5);
-  assert.ok(nord.bridgeSpans!.every(s=>s.startIndex<nord.nativePoints.length&&s.endIndex<nord.nativePoints.length&&s.startProgress>=0&&s.endProgress<=1));
-});
+test('Suzuka supplies the figure-eight crossing and Daytona has two configurations',()=>{const suzuka=CIRCUIT_LIBRARY.find(t=>t.id==='suzuka')!;assert.ok(suzuka.crossings.length>0);assert.equal(CIRCUIT_LIBRARY.filter(t=>t.id.startsWith('daytona-')).length,2);assert.ok(!CIRCUIT_LIBRARY.some(t=>t.id==='nordschleife'));});

@@ -1,0 +1,51 @@
+{
+ "slug": "daytona",
+ "primary_configuration": "NASCAR Tri-Oval (2.5-mile superspeedway)",
+ "turns": [
+  {
+   "number": "1",
+   "name": null,
+   "official_corner": true,
+   "lat": 29.1873,
+   "lon": -81.0635,
+   "note": "31-degree banking. Officially numbered turn; oval turns at Daytona are not given proper names. Turns 1 & 2 form the east end (toward the lake/superstretch entry)."
+  },
+  {
+   "number": "2",
+   "name": null,
+   "official_corner": true,
+   "lat": 29.1893,
+   "lon": -81.0665,
+   "note": "31-degree banking. Exit onto the backstretch (superstretch)."
+  },
+  {
+   "number": "3",
+   "name": null,
+   "official_corner": true,
+   "lat": 29.1858,
+   "lon": -81.0775,
+   "note": "31-degree banking. West end of the oval, entry from backstretch."
+  },
+  {
+   "number": "4",
+   "name": null,
+   "official_corner": true,
+   "lat": 29.1838,
+   "lon": -81.0745,
+   "note": "31-degree banking. Exit onto the front tri-oval toward start/finish."
+  }
+ ],
+ "start_finish": {
+  "lat": 29.183,
+  "lon": -81.07
+ },
+ "sector_count": null,
+ "sectors": [],
+ "sources": [
+  "https://en.wikipedia.org/wiki/Daytona_International_Speedway",
+  "https://www.racingcircuits.info/north-america/usa/daytona.html",
+  "https://daytona.com/auto/daytona-international-speedway"
+ ],
+ "confidence": "high",
+ "notes": "Series is NASCAR, so the primary configuration is the 2.5-mile tri-oval superspeedway, NOT the infield road course. The oval has exactly 4 official turns, all banked at 31 degrees. The front stretch (the 'tri-oval' bend at start/finish) is banked at 18 degrees but is NOT counted as a numbered turn — it is the kink/dogleg of the tri-oval shape. Oval turns at Daytona are officially numbered (1-4) but have no proper names, so name=null for all. NASCAR ovals have NO official published timing sectors (no FIA-style sector timing on ovals), hence sector_count=null and sectors=[]. The track also has a 14-turn infield road course (Daytona Road Course) used for IMSA Rolex 24 and some NASCAR road races, but that is a separate configuration not described here since the series specified is NASCAR (oval). All apex coordinates are approximate, derived from the supplied track center (29.185, -81.07) and standard oval geometry; turn ordering follows NASCAR convention going counter-clockwise from the start/finish on the front tri-oval. Start/finish line position is approximate."
+}

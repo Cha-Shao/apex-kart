@@ -4,6 +4,7 @@ import { makeKart } from './kart';
 import { KartPhysics } from './physics';
 import { bridgeHeight, curbGeometry, runoffGeometry, CURB_WIDTH, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
+import {KART_SPEC} from './kart-spec';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -23,9 +24,11 @@ export class GameScene {
   private target=new THREE.Vector3();
   private desired=new THREE.Vector3();
   private resizeObserver:ResizeObserver;
-  private skidPositions:number[]=[];
-  private skidLine:THREE.LineSegments;
-  private previousSkid:(THREE.Vector3|null)[]=[null,null];
+  private skidPositions=new Float32Array(4096*18);
+  private skidCount=0;
+  private skidCursor=0;
+  private skidMarks:THREE.Mesh;
+  private previousSkid:({center:THREE.Vector3;left:THREE.Vector3;right:THREE.Vector3}|null)[]=[null,null];
   private time=0;
   onContextLost=()=>{};
   constructor(public container:HTMLElement,physics:KartPhysics){
@@ -42,7 +45,8 @@ export class GameScene {
     const sun=new THREE.DirectionalLight(0xfff3d4,3.3);sun.position.set(-100,180,80);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-225,right:225,top:200,bottom:-200,near:1,far:500});sun.shadow.normalBias=.035;sun.shadow.bias=-.0004;this.scene.add(sun);this.scene.add(sun.target);
     const grass=material(0x9aac8d);const floor=new THREE.Mesh(new THREE.PlaneGeometry(200000,200000),grass);floor.rotation.x=-Math.PI/2;floor.position.y=-70.055;floor.receiveShadow=true;this.scene.add(floor);
     this.scene.add(this.landscape,this.circuit,this.scenery,this.kart.root,...this.kart.wheelMeshes);
-    this.skidLine=new THREE.LineSegments(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x141b18,transparent:true,opacity:.36}));this.scene.add(this.skidLine);
+    const skidGeometry=new THREE.BufferGeometry();skidGeometry.setAttribute('position',new THREE.BufferAttribute(this.skidPositions,3).setUsage(THREE.DynamicDrawUsage));skidGeometry.setDrawRange(0,0);
+    this.skidMarks=new THREE.Mesh(skidGeometry,new THREE.MeshBasicMaterial({color:0x101512,transparent:true,opacity:.65,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));this.skidMarks.frustumCulled=false;this.scene.add(this.skidMarks);
     this.camera.position.set(260,290,340);this.orbit=new OrbitControls(this.camera,this.renderer.domElement);this.orbit.enableDamping=true;this.orbit.dampingFactor=.065;this.orbit.maxPolarAngle=Math.PI/2-.08;this.orbit.minDistance=5;this.orbit.maxDistance=100000;this.orbit.target.set(0,0,-8);
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
   }
@@ -94,7 +98,7 @@ export class GameScene {
     const back=this.sign('APEX  /  KART CLUB',track.width+2.9,.83);back.position.set(0,5.48,-.25);back.rotation.y=Math.PI;grid.add(back);
     for(let i=0;i<5;i++){const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,8,8),new THREE.MeshStandardMaterial({color:0xc5ef4e,emissive:0x486612,emissiveIntensity:.5}));lamp.position.set((i-2)*.44,4.68,0);grid.add(lamp);}
     for(const bridge of track.bridges){const s=track.samples[bridge.index],height=bridge.height;for(const side of [-1,1]){const x=s.x+s.nx*(half+.4)*side,z=s.z+s.nz*(half+.4)*side;this.box(this.circuit,x,this.terrain.sample(x,z)+height/2,z,.35,height,.35,0x73877c);}}
-    this.addScenery();this.skidPositions=[];this.skidLine.geometry.dispose();this.skidLine.geometry=new THREE.BufferGeometry();this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;this.frameTrack();
+    this.addScenery();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;this.frameTrack();
   }
   private addScenery(){
     const b=this.track.bounds;
@@ -158,11 +162,22 @@ export class GameScene {
     if(running&&this.physics.telemetry.speed>12){
       let changed=false;
       for(let j=0;j<2;j++){
-        const w=this.physics.vehicle.wheelInfos[j+2],v=new THREE.Vector3(w.raycastResult.hitPointWorld.x,w.raycastResult.hitPointWorld.y+.035,w.raycastResult.hitPointWorld.z);
-        if(w.isInContact&&(this.physics.input.handbrake||w.skidInfo<.7)&&!this.physics.telemetry.offroad){const previous=this.previousSkid[j];if(previous&&previous.distanceTo(v)<2){this.skidPositions.push(...previous.toArray(),...v.toArray());changed=true;}this.previousSkid[j]=v;}else this.previousSkid[j]=null;
+        const w=this.physics.vehicle.wheelInfos[j+2];
+        if(w.isInContact&&(this.physics.input.handbrake||w.skidInfo<.7)&&!this.physics.telemetry.offroad){
+          const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
+          if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
+          const q=w.worldTransform.quaternion,side=new THREE.Vector3(1,0,0).applyQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w));
+          side.addScaledVector(normal,-side.dot(normal)).normalize().multiplyScalar(.29*KART_SPEC.artScale.x*.675);
+          const left=center.clone().add(side),right=center.clone().sub(side),previous=this.previousSkid[j];
+          if(previous){const distance=previous.center.distanceTo(center);if(distance<.02)continue;if(distance<2){
+            const offset=this.skidCursor*18;this.skidPositions.set([...previous.left.toArray(),...previous.right.toArray(),...left.toArray(),...previous.right.toArray(),...right.toArray(),...left.toArray()],offset);
+            (this.skidMarks.geometry.getAttribute('position') as THREE.BufferAttribute).addUpdateRange(offset,18);this.skidCursor=(this.skidCursor+1)%4096;this.skidCount=Math.min(4096,this.skidCount+1);changed=true;
+          }}
+          this.previousSkid[j]={center,left,right};
+        }else this.previousSkid[j]=null;
       }
-      if(changed){if(this.skidPositions.length>24000)this.skidPositions.splice(0,600);this.skidLine.geometry.dispose();this.skidLine.geometry=new THREE.BufferGeometry();this.skidLine.geometry.setAttribute('position',new THREE.Float32BufferAttribute(this.skidPositions,3));}
-    }
+      if(changed){this.skidMarks.geometry.getAttribute('position').needsUpdate=true;this.skidMarks.geometry.setDrawRange(0,this.skidCount*6);}
+    }else this.previousSkid=[null,null];
     if(running||this.time<2)this.renderer.shadowMap.needsUpdate=true;
     this.renderer.render(this.scene,this.camera);
   }

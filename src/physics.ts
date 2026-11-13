@@ -4,7 +4,7 @@ import { TerrainField } from './terrain';
 import {KART_SPEC} from './kart-spec';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
-export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean }
+export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean }
 export class KartPhysics {
   world=new CANNON.World({gravity:new CANNON.Vec3(0,-9.81,0)});
   body:CANNON.Body;
@@ -15,10 +15,13 @@ export class KartPhysics {
   terrainBody:CANNON.Body|null=null;
   roadBody:CANNON.Body|null=null;
   curbBody:CANNON.Body|null=null;
-  telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0};
+  telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0,fourWheelsOutside:false};
   input:DriveInput={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   gripMultiplier=1;
   staged=false;
+  trackLimitsExceeded=false;
+  private wheelRight=new CANNON.Vec3(1,0,0);
+  private trackLimitAxle=new CANNON.Vec3();
   readonly visualOffset=KART_SPEC.visualOffset;
   private brake=0;
   private steer=0;
@@ -65,7 +68,7 @@ export class KartPhysics {
   }
   reset(index=0){
     if(!this.track)return;
-    this.setStaged(false);
+    this.setStaged(false);this.clearTrackLimits();this.telemetry.fourWheelsOutside=false;
     const s=this.track.samples[Math.max(0,index)%this.track.samples.length];
     this.body.position.set(s.x,this.terrain.sample(s.x,s.z)+bridgeHeight(this.track,index)+KART_SPEC.rideHeight,s.z);this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
     this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();
@@ -75,6 +78,25 @@ export class KartPhysics {
     for(let i=0;i<4;i++){this.vehicle.setBrake(0,i);this.vehicle.applyEngineForce(0,i);this.vehicle.setSteeringValue(0,i);this.vehicle.wheelInfos[i].rotation=0;}
   }
   setStaged(staged:boolean){this.staged=staged;this.body.type=staged?CANNON.Body.KINEMATIC:CANNON.Body.DYNAMIC;this.body.updateMassProperties();this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();this.body.aabbNeedsUpdate=true;this.body.wakeUp();}
+  clearTrackLimits(){this.trackLimitsExceeded=false;}
+  private updateTrackLimits(){
+    // The white line is part of the track. A tyre still overlapping it is inside.
+    // White stripe: centre width/2-.24 m, stripe half-width .065 m.
+    const whiteEdge=this.track.width/2-.175;
+    let allOutside=true;
+    for(let i=0;i<4;i++){
+      const wheel=this.vehicle.wheelInfos[i],contact=wheel.isInContact;
+      this.vehicle.updateWheelTransform(i);wheel.isInContact=contact;
+      const point=contact&&wheel.raycastResult.hasHit?wheel.raycastResult.hitPointWorld:wheel.worldTransform.position;
+      const near=nearestOnTrack(this.track,point);
+      wheel.worldTransform.quaternion.vmult(this.wheelRight,this.trackLimitAxle);
+      const halfTread=(i<2?.23:.29)*KART_SPEC.artScale.x*.5;
+      const overlap=halfTread*Math.abs(this.trackLimitAxle.x*near.sample.nx+this.trackLimitAxle.z*near.sample.nz);
+      if(near.distance-overlap<=whiteEdge+.005)allOutside=false;
+    }
+    this.telemetry.fourWheelsOutside=allOutside;
+    this.trackLimitsExceeded ||= allOutside;
+  }
   step(dt:number){
     this.accumulator+=Math.min(dt,.1);
     while(this.accumulator>=1/120){this.fixedStep(1/120);this.accumulator-=1/120;}
@@ -111,6 +133,7 @@ export class KartPhysics {
     const drag=(abs*abs*.46+(abs>.2?19:0))*(offroad?4.5:1);
     b.applyForce(this.forward.scale(-Math.sign(speed)*drag));
     this.world.step(dt);
+    this.updateTrackLimits();
     this.telemetry.speed=Math.hypot(b.velocity.x,b.velocity.z)*3.6;this.telemetry.signedSpeed=speed*3.6;
     this.telemetry.rpm=1500+Math.min(1,abs/26)*2600+this.input.throttle*350;
     this.telemetry.steering=this.steer;this.telemetry.offroad=offroad;

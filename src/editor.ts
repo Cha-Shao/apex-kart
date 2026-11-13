@@ -1,6 +1,6 @@
 import { buildTrack, distance, prepareStroke, type BuildOptions, type Point, type TrackData, type TrackSettings } from './track';
 export type EditorTool='draw'|'edit';
-const COLORS={straight:'#a4cac4',curve:'#70c7a6',hairpin:'#d0ec73'};
+const COLORS={straight:'#ecf0ee',curve:'#c3cdcc',hairpin:'#d6c16d'};
 export class TrackEditor {
   points:Point[]=[];
   track:TrackData|null=null;
@@ -59,20 +59,20 @@ export class TrackEditor {
     this.rebuild();
   }
   draw(){
-    const c=this.ctx;c.clearRect(0,0,this.width,this.height);if(!this.hasReference){c.fillStyle='#172526';c.fillRect(0,0,800,600);}
-    c.fillStyle='#344443';for(let x=20;x<800;x+=30)for(let y=0;y<600;y+=30){c.beginPath();c.arc(x,y,1.35,0,Math.PI*2);c.fill();}
-    c.strokeStyle='#394b44';c.lineWidth=1;c.setLineDash([5,8]);c.strokeRect(25,25,750,550);c.setLineDash([]);
+    const c=this.ctx;c.clearRect(0,0,this.width,this.height);if(!this.hasReference){c.fillStyle='#080d0e';c.fillRect(0,0,800,600);}
+    c.fillStyle='#263032';for(let x=20;x<800;x+=30)for(let y=0;y<600;y+=30){c.beginPath();c.arc(x,y,1.35,0,Math.PI*2);c.fill();}
+    c.strokeStyle='#344244';c.lineWidth=1;c.setLineDash([5,8]);c.strokeRect(25,25,750,550);c.setLineDash([]);
     if(this.track&&!this.down||this.track&&this.tool==='edit'){
       const samples=this.track.samples;const path=()=>{c.beginPath();samples.forEach((s,i)=>{const p=this.toCanvas(s);i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y);});c.closePath();};
-      c.lineJoin='round';c.lineCap='round';path();c.strokeStyle='#41524c';c.lineWidth=Math.max(7,(this.settings.width+5)*this.view.scale);c.stroke();path();c.strokeStyle='#223432';c.lineWidth=Math.max(4,this.settings.width*this.view.scale);c.stroke();
+      c.lineJoin='round';c.lineCap='round';path();c.strokeStyle='#41524c';c.lineWidth=Math.max(7,(this.settings.width+5)*this.view.scale);c.stroke();path();c.strokeStyle='#172020';c.lineWidth=Math.max(4,this.settings.width*this.view.scale);c.stroke();
       for(let i=0;i<samples.length;i++){const a=this.toCanvas(samples[i]),b=this.toCanvas(samples[(i+1)%samples.length]);c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.strokeStyle=COLORS[samples[i].kind];c.lineWidth=3.2;c.stroke();}
-      if(this.tool==='edit')for(let i=0;i<this.points.length;i++){const p=this.toCanvas(this.points[i]);c.beginPath();c.arc(p.x,p.y,i===this.dragging?7:4.8,0,Math.PI*2);c.fillStyle=i===this.dragging?'#d0ec73':'#172526';c.fill();c.strokeStyle='#c2d5c1';c.lineWidth=1.6;c.stroke();}
+      if(this.tool==='edit')for(let i=0;i<this.points.length;i++){const p=this.toCanvas(this.points[i]);c.beginPath();c.arc(p.x,p.y,i===this.dragging?7:4.8,0,Math.PI*2);c.fillStyle=i===this.dragging?'#d6c16d':'#080d0e';c.fill();c.strokeStyle='#c2d5c1';c.lineWidth=1.6;c.stroke();}
       const start=this.toCanvas(samples[0]);c.fillStyle='#d1ed79';c.beginPath();c.arc(start.x,start.y,8,0,Math.PI*2);c.fill();c.strokeStyle='#152727';c.lineWidth=2;c.beginPath();c.moveTo(start.x-3,start.y-4);c.lineTo(start.x+4,start.y);c.lineTo(start.x-3,start.y+4);c.stroke();
       c.fillStyle='#a9b9ad';c.font='15px monospace';c.textAlign='right';c.fillText(`${Math.round(90/this.view.scale)} m`,756,554);c.strokeStyle='#82978a';c.beginPath();c.moveTo(666,565);c.lineTo(756,565);c.stroke();
     }else if(!this.raw.length&&!this.points.length){
       c.textAlign='center';c.fillStyle='#ccdacd';c.font='500 26px sans-serif';c.fillText('在这里画出你的赛道',400,282);c.fillStyle='#7e958b';c.font='20px sans-serif';c.fillText('一笔画个环，松手后自动平滑闭合',400,322);
     }
     const raw=this.raw.length?this.raw:!this.track?this.points:[];
-    if(raw.length){c.strokeStyle='#d0ec73';c.lineWidth=4;c.lineCap='round';c.lineJoin='round';c.beginPath();raw.forEach((s,i)=>{const p=this.toCanvas(s);i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y);});c.stroke();if(raw.length>3){const a=this.toCanvas(raw[0]),b=this.toCanvas(raw.at(-1)!);c.setLineDash([8,8]);c.strokeStyle='#6a8c5b';c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke();c.setLineDash([]);}}
+    if(raw.length){c.strokeStyle='#d6c16d';c.lineWidth=4;c.lineCap='round';c.lineJoin='round';c.beginPath();raw.forEach((s,i)=>{const p=this.toCanvas(s);i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y);});c.stroke();if(raw.length>3){const a=this.toCanvas(raw[0]),b=this.toCanvas(raw.at(-1)!);c.setLineDash([8,8]);c.strokeStyle='#6a8c5b';c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke();c.setLineDash([]);}}
   }
 }

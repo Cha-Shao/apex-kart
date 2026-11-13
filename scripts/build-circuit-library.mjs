@@ -1,13 +1,13 @@
 // Regenerate the local library from the retained, licensed geographic source snapshots.
 // F1 source: bacinger/f1-circuits @ 8094e957b8d6aa8b9f4510c93968556cccd30e02 (MIT).
-// Nordschleife source: OpenStreetMap API, retrieved 2026-11-14 (ODbL 1.0).
+// Daytona source: OpenTrackData / OpenStreetMap (ODbL 1.0), retained local snapshot.
 import fs from 'node:fs';
 import path from 'node:path';
 const root=path.resolve(import.meta.dirname,'..');
 const read=name=>JSON.parse(fs.readFileSync(path.join(root,'src/circuit-data',name),'utf8'));
 const source=read('f1-source.geojson');
 const official=read('official-lengths-2026.json');
-const osm=read('nordschleife-osm-source.json');
+const daytona=read('daytona-source.geojson');
 const records=[
  ['melbourne','au-1953','墨尔本 · 阿尔伯特公园','澳大利亚','AU',1,'australia','2026-03-08'],
  ['shanghai','cn-2004','上海国际赛车场','中国','CN',2,'china','2026-03-15'],
@@ -64,16 +64,20 @@ const data=records.map(([id,sourceId,name,country,countryCode,round,slug,raceDat
  const note=id==='sepang'?'2026 巴林大奖赛移至雪邦举行。':id==='sakhir'?'2026 原定萨基尔站取消；巴林大奖赛改在雪邦举办。':id==='jeddah'?'2026 原定吉达站取消，保留原定赛道供体验。':id==='madrid'?'开源线路为地图轮廓近似，非官方测绘；总长按 F1 当前 5.414 km 校正。':'';
  return {id,name,subtitle:feature.properties.Name,country,countryCode,round,calendarStatus,raceDate,direction,officialLengthM,referenceLengthM:feature.properties.length,officialUrl:info?.url??`https://www.formula1.com/en/racing/2025/${id==='sakhir'?'bahrain':'saudi-arabia'}`,sourceUrl:`https://github.com/bacinger/f1-circuits/blob/8094e957b8d6aa8b9f4510c93968556cccd30e02/circuits/${sourceId}.geojson`,sourceRevision:'8094e957b8d6aa8b9f4510c93968556cccd30e02',sourceCredit:'Tomislav Bacinger / f1-circuits',license:'MIT',verifiedAt:'2026-11-14',bypassValidation:true,notes:note,...normalize(coordinates,officialLengthM)};
 });
-// OSM Nordschleife sections form one degree-2 closed cycle. GP/pit/24h connectors were excluded.
-const incident=new Map();for(const w of osm.ways)for(const n of [w.nodes[0],w.nodes.at(-1)]){if(!incident.has(n))incident.set(n,[]);incident.get(n).push(w);}
-for(const [n,w] of incident)if(w.length!==2)throw Error(`Nordschleife node ${n} has degree ${w.length}, expected 2`);
-const start=506284053,visited=new Set(),orderedNodes=[start],orderedWays=[];let current=start;
-while(visited.size<osm.ways.length){const candidates=incident.get(current)?.filter(w=>!visited.has(w.id));if(!candidates?.length)throw Error('Nordschleife does not close');let way=orderedWays.length?candidates[0]:candidates.find(w=>w.id===41395670);visited.add(way.id);const nodes=way.nodes[0]===current?way.nodes:[...way.nodes].reverse();orderedNodes.push(...nodes.slice(1));orderedWays.push({way,startIndex:orderedNodes.length-nodes.length,endIndex:orderedNodes.length-1});current=orderedNodes.at(-1);}
-if(current!==start)throw Error('Nordschleife not closed');
-orderedNodes.pop();const nord=normalize(orderedNodes.map(id=>osm.nodes[String(id)]),20832);
-const cumul=[0];for(let i=0;i<nord.nativePoints.length;i++)cumul.push(cumul.at(-1)+dist(nord.nativePoints[i],nord.nativePoints[(i+1)%nord.nativePoints.length]));
-const bridgeSpans=orderedWays.filter(w=>w.way.tags.bridge==='yes').map(w=>({startIndex:w.startIndex,endIndex:w.endIndex%nord.nativePoints.length,startProgress:cumul[w.startIndex]/20832,endProgress:Math.min(1,cumul[w.endIndex]/20832),sourceWayId:w.way.id,nativeStart:nord.nativePoints[w.startIndex],nativeEnd:nord.nativePoints[w.endIndex%nord.nativePoints.length],name:w.way.name||'OSM bridge'}));
-data.push({id:'nordschleife',name:'纽博格林 · 北环',subtitle:'Nürburgring Nordschleife',country:'德国',countryCode:'DE',round:null,calendarStatus:'bonus',raceDate:null,direction:'clockwise',officialLengthM:20832,referenceLengthM:20832,officialUrl:'https://www.nuerburgring.de/info/nuerburgring/race-tracks/nordschleife',sourceUrl:'https://www.openstreetmap.org/way/41395670',sourceRevision:'OSM API snapshot 2026-11-14',sourceCredit:'© OpenStreetMap contributors',license:'ODbL-1.0',verifiedAt:'2026-11-14',bypassValidation:true,notes:'20.832 km 完整北环（T13 起终点），不含 GP 赛道或 24 小时连接线；实际地形高程未包含在此平面线路数据中。',bridgeSpans,...nord});
+// Select the exact connected OSM ways for each configuration, excluding pit lanes.
+const routes=[
+ {id:'daytona-road',name:'戴托纳 · 24小时道路赛',subtitle:'Daytona International Speedway · Sports Car Course',length:5730,ways:[352696267,352104911,352104914,1315971773,352070313,352104912,352070310,352070308,352067004,352070311,198466856,352070316]},
+ {id:'daytona-oval',name:'戴托纳 · 三椭圆赛道',subtitle:'Daytona International Speedway · Tri-Oval',length:4023,ways:[11371365,352067004,352070311,352070309,352070316]},
+];
+for(const route of routes){
+ const coordinates=[];
+ for(const id of route.ways){const feature=daytona.features.find(f=>f.properties.kind==='track_centerline'&&f.properties.osm_id===id);if(!feature)throw new Error('Missing Daytona source way '+id);let segment=feature.geometry.coordinates.map(p=>p.slice(0,2));if(coordinates.length){const last=coordinates.at(-1),d=p=>Math.hypot(last[0]-p[0],last[1]-p[1]);if(d(segment.at(-1))<d(segment[0]))segment.reverse();if(d(segment[0])>1e-6)throw new Error('Disconnected Daytona way '+id);segment=segment.slice(1);}coordinates.push(...segment);}
+ // Position the start at the source's marked start/finish on the selected lap.
+ const sf=daytona.features.find(f=>f.properties.kind==='start_finish')?.geometry.coordinates;
+ if(sf){const closed=coordinates.slice(0,-1);let closest=0,best=Infinity;closed.forEach((p,i)=>{const d=(p[0]-sf[0])**2+(p[1]-sf[1])**2;if(d<best){closest=i;best=d;}});coordinates.splice(0,coordinates.length,...closed.slice(closest),...closed.slice(0,closest));}
+ const track=normalize(coordinates,route.length);
+ data.push({id:route.id,name:route.name,subtitle:route.subtitle,country:'美国',countryCode:'US',round:null,calendarStatus:'bonus',raceDate:null,direction:'counterclockwise',officialLengthM:route.length,referenceLengthM:route.length,officialUrl:'https://www.imsa.com/daytona-international-speedway',sourceUrl:'https://github.com/chendo/opentrackdata/blob/main/data/tracks/daytona.geojson',sourceRevision:'OpenTrackData snapshot 2026-11-14',sourceCredit:'© OpenStreetMap contributors / OpenTrackData',license:'ODbL-1.0',verifiedAt:'2026-11-14',bypassValidation:true,notes:'平面地图线形近似；未包含实测高程或椭圆段的真实倾角。'+(route.id==='daytona-road'?'包含内场、国际马蹄弯、西马蹄弯及Le Mans减速弯。':'2.5英里三椭圆布局。'),...track});
+}
 const definitions=`/** Licensed real-world centreline approximations. Generated by scripts/build-circuit-library.mjs. */
 import type { Point } from './track';
 export type CircuitCalendarStatus='current-2026'|'original-2026'|'bonus';
@@ -90,11 +94,10 @@ export interface CircuitPreset {
 }
 export const CIRCUIT_LIBRARY_VERIFIED_AT='2026-11-14';
 export const F1_CALENDAR_URL='https://www.formula1.com/en/racing/2026';
-export const F1_CALENDAR_NOTE='2026 当前正式赛历 23 站；保留原定萨基尔、吉达两条布局，另含纽北。赛历核实于 2026-11-14。';
+export const F1_CALENDAR_NOTE='2026 当前正式赛历 23 站；保留原定萨基尔、吉达两条布局，另含戴托纳道路赛与三椭圆布局。赛历核实于 2026-11-14。';
 export const CIRCUIT_LIBRARY: CircuitPreset[] = `;
 fs.writeFileSync(path.join(root,'src/circuit-library.ts'),definitions+JSON.stringify(data)+';\n');
 fs.mkdirSync(path.join(root,'public/data'),{recursive:true});
-fs.writeFileSync(path.join(root,'public/data/nordschleife-centreline.geojson'),JSON.stringify({type:'FeatureCollection',license:'https://opendatacommons.org/licenses/odbl/1-0/',attribution:'© OpenStreetMap contributors',source:'https://www.openstreetmap.org/copyright',retrievedAt:'2026-11-14',features:[{type:'Feature',properties:{name:'Nürburgring Nordschleife',referenceLengthM:20832,sourceWays:orderedWays.map(w=>({id:w.way.id,version:w.way.version}))},geometry:{type:'LineString',coordinates:[...orderedNodes.map(id=>osm.nodes[String(id)]),osm.nodes[String(start)]]}}]}));
+fs.copyFileSync(path.join(root,'src/circuit-data/daytona-source.geojson'),path.join(root,'public/data/daytona-source.geojson'));
 console.log(data.map(t=>({id:t.id,round:t.round,length:t.officialLengthM,points:t.nativePoints.length,compact:Math.round(t.compactLengthM),crossings:t.crossings.length,bridges:t.bridgeSpans?.length??0})));
 console.log('active',data.filter(t=>t.calendarStatus==='current-2026').length,'original',data.filter(t=>t.calendarStatus==='original-2026').length,'bonus',data.filter(t=>t.calendarStatus==='bonus').length);
-for(const t of data)if(Math.abs(length(t.nativePoints)-t.officialLengthM)>.01||t.nativePoints.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.z))||t.compactBounds.minX< -190.001||t.compactBounds.maxZ>130.001)throw Error(`Invalid normalized track ${t.id}`);
