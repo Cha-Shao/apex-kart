@@ -4,7 +4,9 @@ const require=createRequire('C:/Users/Administrator/.cache/codex-runtimes/codex-
 const {chromium}=require('playwright');
 await mkdir('test-results',{recursive:true});
 const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox']});
+try {
 const page=await browser.newPage({viewport:{width:1440,height:960},deviceScaleFactor:1});
+page.setDefaultTimeout(90000);
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.goto('http://localhost:5173/',{waitUntil:'networkidle'});
 await page.waitForFunction(()=>window.apex?.game||!document.querySelector('#error-overlay').hidden);
@@ -25,10 +27,11 @@ const pts=[];for(let i=0;i<=90;i++){const a=i/90*Math.PI*2;pts.push({x:rect.x+re
 await page.mouse.move(pts[0].x,pts[0].y);await page.mouse.down();for(const p of pts)await page.mouse.move(p.x,p.y);await page.mouse.up();
 console.log('drawn',await page.evaluate(()=>({samples:window.apex.editor.track?.samples.length,error:document.querySelector('#editor-status').textContent,points:window.apex.editor.points.length})));
 await page.getByRole('button',{name:'生成赛道',exact:true}).click();
-await page.screenshot({path:'test-results/drawn.png'});
 await page.getByRole('button',{name:'保存赛道'}).click();await page.reload({waitUntil:'networkidle'});
 console.log('restore',await page.locator('#track-name').textContent());
 await page.setViewportSize({width:390,height:844});await page.waitForTimeout(1000);await page.screenshot({path:'test-results/mobile.png',fullPage:true});
 console.log('mobile',await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,editorVisible:!!document.querySelector('#editor-panel').offsetHeight})));
 await page.getByRole('button',{name:'上车试驾'}).click();await page.waitForTimeout(1200);await page.screenshot({path:'test-results/mobile-driving.png'});
-console.log('errors',errors);await writeFile('test-results/browser-errors.json',JSON.stringify(errors,null,2));await browser.close();
+console.log('errors',errors);await writeFile('test-results/browser-errors.json',JSON.stringify(errors,null,2));
+if(errors.length)throw new Error('Browser reported JavaScript errors.');
+} finally { await browser.close(); }
