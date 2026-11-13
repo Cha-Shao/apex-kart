@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {KART_SPEC} from './kart-spec';
 const mat=(color:number,metalness=0,roughness=.65)=>new THREE.MeshStandardMaterial({color,metalness,roughness});
 export function makeKart(){
   const root=new THREE.Group();
@@ -22,9 +23,10 @@ export function makeKart(){
   // Driver: legs, torso, articulated arms and a helmet with a dark visor.
   for(const x of [-.16,.16]){const leg=box(x,.20,-.20,.19,.20,.65,suit);leg.rotation.x=.15;box(x,.14,-.60,.20,.13,.24,black);}
   const torso=part(new THREE.CapsuleGeometry(.22,.22,5,10),suit,0,.60,.32);torso.rotation.x=-.18;
-  part(new THREE.SphereGeometry(.265,24,16),white,0,1.05,.28);
-  const visor=part(new THREE.SphereGeometry(.272,24,12,Math.PI*.55,Math.PI*.9,Math.PI*.30,Math.PI*.40),dark,0,1.06,.28);visor.rotation.y=Math.PI;
-  box(0,1.302,.27,.065,.016,.22,paint);
+  const head=new THREE.Group();root.add(head);
+  part(new THREE.SphereGeometry(.265,24,16),white,0,1.05,.28,head);
+  const visor=part(new THREE.SphereGeometry(.272,24,12,Math.PI*.55,Math.PI*.9,Math.PI*.30,Math.PI*.40),dark,0,1.06,.28,head);visor.rotation.y=Math.PI;
+  box(0,1.302,.27,.065,.016,.22,paint,head);
   const steering=new THREE.Group();steering.position.set(0,.47,-.32);steering.rotation.x=.60;root.add(steering);
   const ring=part(new THREE.TorusGeometry(.22,.027,8,24),black,0,0,0,steering);ring.rotation.x=0;
   for(const a of [0,Math.PI*2/3,Math.PI*4/3]){const spoke=box(Math.sin(a)*.10,Math.cos(a)*.10,0,.025,.22,.025,metal,steering);spoke.rotation.z=-a;}
@@ -41,7 +43,8 @@ export function makeKart(){
     const wheel=new THREE.Group();const width=i<2?.23:.29;
     const cylinder=new THREE.Mesh(new THREE.CylinderGeometry(.29,.29,width,24),tire);cylinder.rotation.z=Math.PI/2;cylinder.castShadow=true;wheel.add(cylinder);
     for(const side of [-1,1]){const sideWall=new THREE.Mesh(new THREE.TorusGeometry(.228,.048,8,24),rubberEdge);sideWall.rotation.y=Math.PI/2;sideWall.position.x=side*width/2;wheel.add(sideWall);const hub=new THREE.Mesh(new THREE.CylinderGeometry(.125,.125,.012,12),metal);hub.rotation.z=Math.PI/2;hub.position.x=side*(width/2+.007);wheel.add(hub);const cap=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.02,8),dark);cap.rotation.z=Math.PI/2;cap.position.x=side*(width/2+.017);wheel.add(cap);}
-    const wrapper=new THREE.Group();wrapper.add(wheel);wheelMeshes.push(wrapper);
+    const wrapper=new THREE.Group();wrapper.add(wheel);wrapper.scale.set(KART_SPEC.artScale.x,KART_SPEC.wheelRadius/.29,KART_SPEC.wheelRadius/.29);wheelMeshes.push(wrapper);
   }
-  return {root,wheelMeshes,paint,steering};
+  root.scale.set(KART_SPEC.artScale.x,KART_SPEC.artScale.y,KART_SPEC.artScale.z);
+  return {root,wheelMeshes,paint,steering,head};
 }

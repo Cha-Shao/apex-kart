@@ -1,6 +1,7 @@
 import * as CANNON from 'cannon-es';
 import { bridgeHeight, curbGeometry, isOnAsphalt, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
+import {KART_SPEC} from './kart-spec';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
 export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean }
@@ -18,7 +19,7 @@ export class KartPhysics {
   input:DriveInput={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   gripMultiplier=1;
   staged=false;
-  readonly visualOffset=.20;
+  readonly visualOffset=KART_SPEC.visualOffset;
   private brake=0;
   private steer=0;
   private lastForward=0;
@@ -36,12 +37,12 @@ export class KartPhysics {
     this.world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:.25,restitution:.1,contactEquationStiffness:1e7}));
     const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);
     this.body=new CANNON.Body({mass:165,material:chassisMaterial,linearDamping:.025,angularDamping:.4});
-    // Move the mass origin down without moving the visible chassis or wheels.
-    this.body.addShape(new CANNON.Box(new CANNON.Vec3(.70,.16,1.08)),new CANNON.Vec3(0,.22,0));
+    const scale=KART_SPEC.artScale;
+    this.body.addShape(new CANNON.Box(new CANNON.Vec3(.70*scale.x,.16*scale.y,1.08*scale.z)),new CANNON.Vec3(0,KART_SPEC.visualOffset+.02*scale.y,0));
     this.body.allowSleep=false;
     this.vehicle=new CANNON.RaycastVehicle({chassisBody:this.body,indexRightAxis:0,indexUpAxis:1,indexForwardAxis:2});
-    const wheel={radius:.29,directionLocal:new CANNON.Vec3(0,-1,0),axleLocal:new CANNON.Vec3(-1,0,0),suspensionStiffness:55,suspensionRestLength:.24,frictionSlip:2.1,dampingRelaxation:5.8,dampingCompression:4.4,maxSuspensionForce:17000,maxSuspensionTravel:.15,rollInfluence:.08,customSlidingRotationalSpeed:-25,useCustomSlidingRotationalSpeed:true};
-    for(const [x,z] of [[-.81,-.83],[.81,-.83],[-.84,.79],[.84,.79]])this.vehicle.addWheel({...wheel,chassisConnectionPointLocal:new CANNON.Vec3(x,.20,z),isFrontWheel:z<0});
+    const spec=KART_SPEC,wheel={radius:spec.wheelRadius,directionLocal:new CANNON.Vec3(0,-1,0),axleLocal:new CANNON.Vec3(-1,0,0),suspensionStiffness:spec.suspensionStiffness,suspensionRestLength:spec.suspensionRestLength,frictionSlip:2.1,dampingRelaxation:5.8,dampingCompression:4.4,maxSuspensionForce:17000,maxSuspensionTravel:spec.suspensionTravel,rollInfluence:.08,customSlidingRotationalSpeed:-25,useCustomSlidingRotationalSpeed:true};
+    for(const [x,z] of [[-spec.frontHalfTrack,spec.frontZ],[spec.frontHalfTrack,spec.frontZ],[-spec.rearHalfTrack,spec.rearZ],[spec.rearHalfTrack,spec.rearZ]])this.vehicle.addWheel({...wheel,chassisConnectionPointLocal:new CANNON.Vec3(x,spec.connectionY,z),isFrontWheel:z<0});
     this.vehicle.addToWorld(this.world);
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField()){
@@ -66,7 +67,7 @@ export class KartPhysics {
     if(!this.track)return;
     this.setStaged(false);
     const s=this.track.samples[Math.max(0,index)%this.track.samples.length];
-    this.body.position.set(s.x,this.terrain.sample(s.x,s.z)+bridgeHeight(this.track,index)+.2854,s.z);this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
+    this.body.position.set(s.x,this.terrain.sample(s.x,s.z)+bridgeHeight(this.track,index)+KART_SPEC.rideHeight,s.z);this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
     this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();
     this.body.previousPosition.copy(this.body.position);this.body.interpolatedPosition.copy(this.body.position);this.body.previousQuaternion.copy(this.body.quaternion);this.body.interpolatedQuaternion.copy(this.body.quaternion);
     this.body.aabbNeedsUpdate=true;this.body.wakeUp();this.steer=0;this.brake=0;this.lastForward=0;this.lastLateral=0;this.accumulator=0;
@@ -91,8 +92,9 @@ export class KartPhysics {
     const target=this.input.steer*(.51/(1+abs*.055));
     this.steer+=(target-this.steer)*(1-Math.exp(-dt*7.5));
     // Ackermann front steering: the inner wheel follows a tighter radius.
-    const turnRadius=Math.abs(this.steer)>.001?1.62/Math.tan(Math.abs(this.steer)):1e6;
-    const inner=Math.atan(1.62/Math.max(1.2,turnRadius-.81)),outer=Math.atan(1.62/(turnRadius+.81)),sign=Math.sign(this.steer);
+    const wheelbase=KART_SPEC.wheelbase,halfTrack=KART_SPEC.frontHalfTrack;
+    const turnRadius=Math.abs(this.steer)>.001?wheelbase/Math.tan(Math.abs(this.steer)):1e6;
+    const inner=Math.atan(wheelbase/Math.max(wheelbase*.72,turnRadius-halfTrack)),outer=Math.atan(wheelbase/(turnRadius+halfTrack)),sign=Math.sign(this.steer);
     this.vehicle.setSteeringValue((this.steer>0?inner:outer)*sign,0);this.vehicle.setSteeringValue((this.steer>0?outer:inner)*sign,1);
     const engine=this.input.reverse?(speed>-6?-230:0):(560*this.input.throttle*Math.max(0,1-Math.pow(Math.max(0,speed)/27,3)));
     this.brake+=(this.input.brake-this.brake)*(1-Math.exp(-dt*18));
