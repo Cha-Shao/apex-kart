@@ -93,7 +93,7 @@ const audio=new EngineAudio();
 const pedals=new PedalHistory();
 const timing=new SectorTiming();
 let soundTouched=false;
-let running=false,paused=false,countingDown=false,countdown=0,lapTime=0,lapNumber=1,bestTime=Infinity,checkpoint=0,lapStarted=false;
+let running=false,paused=false,countingDown=false,countdown=0,goDisplay=0,lapTime=0,lapNumber=1,bestTime=Infinity,checkpoint=0,lapStarted=false;
 let lastProgress=0,lastTime=performance.now(),hudElapsed=0,fpsAccum=0,fpsFrames=0;
 const keys=new Set<string>(),touchKeys=new Set<string>();
 
@@ -121,7 +121,7 @@ function startDrive(){
   if(!game)return;if(dirty&&draftTrack)applyDraft();
   if(!currentTrack)return;
   pedals.reset();timing.reset();$('#lap-history-list').innerHTML='<li>完成首圈后显示</li>';if(!soundTouched){soundTouched=true;void audio.setEnabled(true).then(updateSoundButton).catch(()=>toast('点击顶栏声音按钮启用 200cc 引擎音效。'));}
-  physics.reset();keys.clear();touchKeys.clear();running=true;paused=false;countingDown=true;countdown=3.25;lapTime=0;lapNumber=1;checkpoint=0;lapStarted=false;lastProgress=0;
+  physics.reset();keys.clear();touchKeys.clear();running=true;paused=false;countingDown=true;countdown=3;goDisplay=0;physics.setStaged(true);lapTime=0;lapNumber=1;checkpoint=0;lapStarted=false;lastProgress=0;
   bestTime=Number(safeStorage.get(bestKey()))||Infinity;
   document.body.classList.add('is-driving');setEditorVisible(false);setCamera('chase');
   for(const id of ['session-top','driving-hud','race-actions','mobile-controls','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=false;
@@ -130,14 +130,14 @@ function startDrive(){
   $('#scene-label').textContent='自由练习';$('#render-status').textContent='物理模拟运行中';$('#lap-count').textContent='01';$('#best-time').textContent=formatTime(bestTime);$('#pause-button').innerHTML='<i data-lucide="pause"></i>';icons();
 }
 function exitDrive(){
-  running=false;paused=false;countingDown=false;keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
+  running=false;paused=false;countingDown=false;physics.setStaged(false);keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   document.body.classList.remove('is-driving');setEditorVisible(true);setCamera('orbit');
   for(const id of ['session-top','driving-hud','race-actions','mobile-controls','center-message','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=true;
   for(const id of ['hero-copy','session-card','kart-spec'])$(`#${id}`).hidden=false;
   $('#controls-hint').innerHTML='<span><kbd>拖动</kbd> 旋转视角</span><span><kbd>滚轮</kbd> 缩放</span><span class="hint-extra">探索你的赛道</span>';$('#scene-label').textContent='赛道预览';$('#render-status').textContent='3D 实时预览';
 }
 function pause(){if(!running)return;paused=!paused;keys.clear();touchKeys.clear();$('#center-message').hidden=!paused;$('#center-message').innerHTML=paused?'<span class="pause-title">休息一拍。</span><small>按 Esc 或点击暂停键继续</small>':'';$('#pause-button').innerHTML=`<i data-lucide="${paused?'play':'pause'}"></i>`;$('#pause-button').setAttribute('aria-label',paused?'继续':'暂停');icons();}
-function resetKart(){if(!running)return;const near=nearestOnTrack(currentTrack,physics.body.position);physics.reset(near.index);keys.clear();touchKeys.clear();pedals.reset();timing.time=0;timing.start=0;timing.sector=0;timing.splits=[];timing.previousProgress=near.index/currentTrack.samples.length;lapTime=0;lapStarted=false;checkpoint=0;lastProgress=near.index/currentTrack.samples.length;toast('已在最近路段复位，本圈计时已重置。');}
+function resetKart(){if(!running)return;const near=nearestOnTrack(currentTrack,physics.body.position);physics.reset(near.index);if(countingDown)physics.setStaged(true);keys.clear();touchKeys.clear();pedals.reset();timing.time=0;timing.start=0;timing.sector=0;timing.splits=[];timing.previousProgress=near.index/currentTrack.samples.length;lapTime=0;lapStarted=false;checkpoint=0;lastProgress=near.index/currentTrack.samples.length;toast('已在最近路段复位，本圈计时已重置。');}
 
 document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.addEventListener('click',()=>{editor.setTool(b.dataset.tool as any);document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('selected',x===b));setStatus(b.dataset.tool==='draw'?'按住鼠标或手指，一笔画出不交叉的环线。':'拖动圆点，调整路线；点击生成应用。');}));
 document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach(b=>b.addEventListener('click',()=>{const p=PRESETS.find(p=>p.id===b.dataset.preset)!;draftRoute=undefined;editor.options={};draftName=p.name;editor.setPoints(p.points);terrainPainter!.setField(TerrainField.around(p.points));updateTerrainControls();editor.setTool('edit');document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('selected',(x as HTMLElement).dataset.tool==='edit'));document.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('selected',x===b));}));
@@ -184,13 +184,14 @@ function updateLap(dt:number){
  document.querySelectorAll<HTMLElement>('[data-sector]').forEach((bar,i)=>{bar.className='sector-bar '+timing.colors[i];bar.querySelector<HTMLElement>('i')!.style.width=Math.max(0,Math.min(1,progress*3-i))*100+'%';bar.querySelector('small')!.textContent=timing.splits[i]?.toFixed(2)||'—';});
 }
 function updateMinimap(){const canvas=$<HTMLCanvasElement>('#minimap'),c=canvas.getContext('2d')!;c.clearRect(0,0,260,190);const b=currentTrack.bounds,s=Math.min(218/(b.maxX-b.minX),140/(b.maxZ-b.minZ)),map=(p:Point)=>({x:130+(p.x-(b.maxX+b.minX)/2)*s,y:95+(p.z-(b.maxZ+b.minZ)/2)*s});c.lineWidth=4;c.lineJoin='round';c.strokeStyle='#647d6d';c.beginPath();currentTrack.samples.forEach((p,i)=>{const v=map(p);i?c.lineTo(v.x,v.y):c.moveTo(v.x,v.y);});c.closePath();c.stroke();const st=map(currentTrack.samples[0]);c.fillStyle='#bcd888';c.fillRect(st.x-3,st.y-3,6,6);const p=map(physics.body.position);c.fillStyle='#dcf57a';c.shadowColor='#c4ee52';c.shadowBlur=9;c.beginPath();c.arc(p.x,p.y,5,0,Math.PI*2);c.fill();c.shadowBlur=0;}
-function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;$('#lap-time').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/4800*22)));updateMinimap();}
+function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;$('#lap-time').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/4800*22)));updateMinimap();}
 function animate(now:number){
   const dt=Math.min((now-lastTime)/1000,.06);lastTime=now;
   if(game){
     if(running&&!paused){
-      if(countingDown){countdown-=dt;physics.input={throttle:0,brake:1,steer:0,handbrake:false,reverse:false};physics.step(dt);$('#center-message').hidden=false;$('#center-message').innerHTML=countdown>.3?`<span class="countdown-number">${Math.ceil(countdown-.3)}</span><small>找到节奏，瞄准弯心。</small>`:'<span class="countdown-go">GO.</span>';if(countdown<-.6){countingDown=false;$('#center-message').hidden=true;}}
-      else{
+      if(countingDown){countdown=Math.max(0,countdown-dt);if(countdown===0){countingDown=false;physics.setStaged(false);goDisplay=.8;}else{physics.step(dt);$('#center-message').hidden=false;$('#center-message').innerHTML=`<span class="countdown-number">${Math.ceil(countdown)}</span><small>找到节奏，瞄准弯心。</small>`;}}
+      if(!countingDown){
+        if(goDisplay>0){goDisplay-=dt;$('#center-message').hidden=false;$('#center-message').innerHTML='<span class="countdown-go">GO.</span>';}else $('#center-message').hidden=true;
         const accel=keys.has('KeyW')||keys.has('ArrowUp')||touchKeys.has('throttle'),brake=keys.has('KeyS')||keys.has('ArrowDown')||touchKeys.has('brake'),left=keys.has('KeyA')||keys.has('ArrowLeft')||touchKeys.has('left'),right=keys.has('KeyD')||keys.has('ArrowRight')||touchKeys.has('right');
         physics.input={throttle:accel?1:0,brake:brake&&physics.telemetry.signedSpeed>1?1:0,reverse:brake&&physics.telemetry.signedSpeed<=1&&!accel,steer:(left?1:0)-(right?1:0),handbrake:keys.has('Space')};physics.step(dt);pedals.record(dt,physics.input.throttle,physics.input.brake);updateLap(dt);
         if(!Number.isFinite(physics.body.position.y)||physics.body.position.y< -90)resetKart();

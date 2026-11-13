@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeKart } from './kart';
 import { KartPhysics } from './physics';
-import { bridgeHeight, curbGeometry, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, curbGeometry, runoffGeometry, CURB_WIDTH, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
@@ -70,7 +70,7 @@ export class GameScene {
   setTrack(track:TrackData,settings:TrackSettings,terrain:TerrainField=new TerrainField()){
     this.track=track;this.terrain=terrain.clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);
     const half=track.width/2;
-    this.ribbon(track,0,track.width+2.6,.006,0xb6baab);
+    const runoff=runoffGeometry(track,(x,z)=>this.terrain.sample(x,z)),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();const runoffMat=material(0x59615b);runoffMat.polygonOffset=true;runoffMat.polygonOffsetFactor=-.8;runoffMat.polygonOffsetUnits=-.8;const apron=new THREE.Mesh(runoffGeo,runoffMat);apron.receiveShadow=true;this.circuit.add(apron);
     this.ribbon(track,0,track.width,.018,0x414b4b);
     for(const side of [-1,1]){
       this.ribbon(track,side*(half-.24),.13,.026,0xe5e8d7);
@@ -79,7 +79,7 @@ export class GameScene {
         const curb=(i:number)=>Math.abs(track.samples[i].curvature)>.009;
         
         
-        this.ribbon(track,side*(half+1.15),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>.024&&Math.sign(track.samples[i].curvature)===side);
+        this.ribbon(track,side*(half+CURB_WIDTH+.25),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>.024&&Math.sign(track.samples[i].curvature)===side);
       }
 
     }
@@ -132,11 +132,11 @@ export class GameScene {
     this.orbit.target.copy(center);this.camera.position.copy(center).add(new THREE.Vector3(size*.57*scale,size*.90*scale,size*.94*scale));this.camera.lookAt(center);this.orbit.update();
     const fog=this.scene.fog as THREE.Fog,range=this.camera.position.distanceTo(center);fog.near=Math.max(450,range*.95);fog.far=Math.max(1000,range*2.5);this.camera.near=Math.max(1,range/2000);this.camera.far=Math.max(1400,range*4);this.camera.updateProjectionMatrix();
   }
-  setCamera(mode:CameraMode){this.mode=mode;this.camera.near=mode==='cockpit'?.08:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.Fog;fog.near=400;fog.far=950;}}
+  setCamera(mode:CameraMode){this.mode=mode;this.camera.near=mode==='cockpit'?.08:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.Fog;fog.near=400;fog.far=950;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3(0,4.2,7.4).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
-    const body=this.physics.body;this.kart.root.position.copy(body.position as any);this.kart.root.quaternion.copy(body.quaternion as any);
+    const body=this.physics.body;this.kart.root.position.copy(body.position as any);this.kart.root.position.y+=this.physics.visualOffset;this.kart.root.quaternion.copy(body.quaternion as any);
     this.kart.steering.rotation.z=this.physics.telemetry.steering*1.8;
     this.kart.wheelMeshes.forEach((w,i)=>{const t=this.physics.vehicle.wheelInfos[i].worldTransform;w.position.copy(t.position as any);w.quaternion.copy(t.quaternion as any);});
     if(this.mode==='orbit')this.orbit.update();

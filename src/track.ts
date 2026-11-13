@@ -4,7 +4,10 @@ import { parseTerrain, type TerrainData } from './terrain';
 export interface Point { x: number; z: number }
 export type SegmentKind = 'straight' | 'curve' | 'hairpin';
 export interface TrackSample extends Point { tx: number; tz: number; nx: number; nz: number; curvature: number; kind: SegmentKind; distance: number }
-export interface TrackData { controls: Point[]; samples: TrackSample[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
+export interface RunoffSample extends Point {nx:number;nz:number;radius:number}
+export interface RunoffRegion {points:[Point,Point,Point,Point];side:number;index:number;minX:number;maxX:number;minZ:number;maxZ:number}
+export const CURB_WIDTH=1.88;
+export interface TrackData { controls: Point[]; samples: TrackSample[]; runoff:RunoffSample[]; runoffRegions:RunoffRegion[];curbs:boolean; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
 export interface Bridge { index:number;otherIndex:number;distance:number;height:number;halfLength:number }
 export interface BuildOptions { preserveLayout?:boolean;allowCrossings?:boolean }
 export interface RouteMetadata {circuitId:string;scale:'native'|'compact'}
@@ -73,12 +76,27 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   for(let k=0;k<=n;k++){const s=samples[(k+Math.max(0,offset))%n];const turn=Math.sign(s.curvature);if(s.kind!=='straight'){if(!inCorner||turn!==sign){if(inCorner&&hasHairpin)hairpins++;corners++;hasHairpin=false;}inCorner=true;sign=turn;hasHairpin ||= s.kind==='hairpin';}else{if(inCorner&&hasHairpin)hairpins++;inCorner=false;hasHairpin=false;}}
   const xs=samples.map(s=>s.x),zs=samples.map(s=>s.z);
   const bridges:Bridge[]=crossings.slice(0,8).map(c=>({index:c.j,otherIndex:c.i,distance:c.j*step,height:5.2,halfLength:Math.min(length*.06,Math.max(42,settings.width*6))}));
-  return {controls,samples,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
+  let smooth:Point[]=samples.map(s=>({x:s.x,z:s.z}));const radius=Math.max(2,Math.min(18,Math.ceil(14/step)));
+  for(let pass=0;pass<3;pass++){const previous=smooth;smooth=previous.map((_,i)=>{let x=0,z=0,w=0;for(let j=-radius;j<=radius;j++){const weight=radius+1-Math.abs(j),p=previous[(i+j+n)%n];x+=p.x*weight;z+=p.z*weight;w+=weight;}return{x:x/w,z:z/w};});}
+  const runoff:RunoffSample[]=smooth.map((p,i)=>{const a=smooth[(i-2+n)%n],b=smooth[(i+2)%n],dx=b.x-a.x,dz=b.z-a.z,l=Math.hypot(dx,dz)||1;return {...p,nx:-dz/l,nz:dx/l,radius:settings.width/2+CURB_WIDTH+3+Math.min(10,Math.abs(samples[i].curvature)*180)};});
+  const runoffRegions:RunoffRegion[]=[];
+  for(let i=0;i<n;i++){const turn=samples[i].curvature;if(Math.abs(turn)<=.009)continue;const side=-Math.sign(turn),j=(i+1)%n,inner=settings.width/2+(settings.curbs?CURB_WIDTH:0);
+    const edge=(k:number)=>{const s=samples[k],r=runoff[k],a={x:s.x+s.nx*inner*side,z:s.z+s.nz*inner*side},candidate={x:r.x+r.nx*r.radius*side,z:r.z+r.nz*r.radius*side};const t=Math.max(0,Math.min(1,(Math.abs(s.curvature)-.009)/.012)),fade=t*t*(3-2*t);if((candidate.x-a.x)*s.nx*side+(candidate.z-a.z)*s.nz*side<0){candidate.x=a.x+s.nx*side*3;candidate.z=a.z+s.nz*side*3;}return [a,{x:a.x+(candidate.x-a.x)*fade,z:a.z+(candidate.z-a.z)*fade}];};
+    const [a,b]=edge(i),[c,d]=edge(j),points:[Point,Point,Point,Point]=[a,b,c,d];runoffRegions.push({points,side,index:i,minX:Math.min(...points.map(p=>p.x)),maxX:Math.max(...points.map(p=>p.x)),minZ:Math.min(...points.map(p=>p.z)),maxZ:Math.max(...points.map(p=>p.z))});
+  }
+  return {controls,samples,runoff,runoffRegions,curbs:settings.curbs,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
 }
+
+export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number){
+  const near=nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;if(track.curbs&&Math.abs(near.sample.curvature)>.009&&d<=track.width/2+CURB_WIDTH)return true;
+  const triangle=(a:Point,b:Point,c:Point)=>{const cross=(u:Point,v:Point)=>(v.x-u.x)*(p.z-u.z)-(v.z-u.z)*(p.x-u.x),area=(b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x);if(Math.abs(area)<1e-7)return false;const x=cross(a,b),y=cross(b,c),z=cross(c,a);return x>=-1e-6&&y>=-1e-6&&z>=-1e-6||x<=1e-6&&y<=1e-6&&z<=1e-6;};
+  for(const r of track.runoffRegions){if(p.x<r.minX||p.x>r.maxX||p.z<r.minZ||p.z>r.maxZ)continue;const [a,b,c,d]=r.points;if(triangle(a,b,c)||triangle(b,d,c))return true;}return false;
+}
+export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[];for(const r of track.runoffRegions){const base=vertices.length/3;r.points.forEach((p,j)=>vertices.push(p.x,surface(p.x,p.z)+bridgeHeight(track,(r.index+(j>=2?1:0))%track.samples.length)+.008,p.z));if(r.side>0)indices.push(base,base+1,base+2,base+1,base+3,base+2);else indices.push(base,base+2,base+1,base+1,base+2,base+3);}return {vertices,indices};}
 
 export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
-export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[],colors:number[]=[];const n=track.samples.length;for(const side of [-1,1])for(let i=0;i<n;i++){if(Math.abs(track.samples[i].curvature)<.009)continue;const base=vertices.length/3;for(const k of [i,(i+1)%n])for(let j=0;j<=6;j++){const s=track.samples[k],u=j/6,offset=side*(track.width/2+u*.94),x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.025+Math.sin(u*Math.PI)*.12,z);const red=Math.floor(track.samples[i].distance/2.15)%2===0;colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));}for(let j=0;j<6;j++){const a=base+j,b=a+7;if(side===1)indices.push(a,a+1,b,a+1,b+1,b);else indices.push(a,b,a+1,a+1,b,b+1);}}return {vertices,indices,colors};}
+export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[],colors:number[]=[];const n=track.samples.length;for(const side of [-1,1])for(let i=0;i<n;i++){if(Math.abs(track.samples[i].curvature)<.009)continue;const base=vertices.length/3;for(const k of [i,(i+1)%n])for(let j=0;j<=6;j++){const s=track.samples[k],u=j/6,offset=side*(track.width/2+u*CURB_WIDTH),x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.025+Math.sin(u*Math.PI)*.12,z);const red=Math.floor(track.samples[i].distance/2.15)%2===0;colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));}for(let j=0;j<6;j++){const a=base+j,b=a+7;if(side===1)indices.push(a,a+1,b,a+1,b+1,b);else indices.push(a,b,a+1,a+1,b,b+1);}}return {vertices,indices,colors};}
 
 export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:number;signedDistance:number;sample:TrackSample} {
   let best=Infinity,index=0,signedDistance=0;
@@ -99,3 +117,4 @@ export function parseTrackFile(text:string):TrackFile {
   const terrain=v.terrain?parseTerrain(v.terrain).toJSON():undefined;
   return {version:2,name:String(v.name||'我的赛道').slice(0,40),points:v.points,settings,terrain,route};
 }
+

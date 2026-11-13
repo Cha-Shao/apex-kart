@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { KartPhysics } from '../src/physics.ts';
 import { buildTrack, DEFAULT_SETTINGS, PRESETS } from '../src/track.ts';
 const setup=()=>{const p=new KartPhysics();p.setTrack(buildTrack(PRESETS[0].points,DEFAULT_SETTINGS),DEFAULT_SETTINGS);for(let i=0;i<240;i++)p.step(1/120);return p;};
-test('four-wheel suspension settles under gravity without ground penetration',()=>{const p=setup();assert.equal(p.telemetry.grounded,4);assert.ok(p.body.position.y>.3&&p.body.position.y<.7);assert.ok(Math.abs(p.body.velocity.y)<.1);});
+test('four-wheel suspension settles under gravity without ground penetration',()=>{const p=setup();assert.equal(p.telemetry.grounded,4);assert.ok(p.body.position.y>.20&&p.body.position.y<.40);assert.ok(Math.abs(p.body.velocity.y)<.1);});
 test('rear-wheel engine accelerates the dynamic body and service brakes stop it',()=>{
   const p=setup(),start=p.body.position.clone();p.input.throttle=1;for(let i=0;i<480;i++)p.step(1/120);
   const fast=p.telemetry.speed;assert.ok(fast>35&&fast<100,`speed ${fast}`);assert.ok(p.body.position.distanceTo(start)>15);
@@ -21,3 +21,4 @@ test('a dynamic kart can freely leave the track',()=>{
   let furthest=0;for(let i=0;i<180;i++){p.step(1/120);furthest=Math.max(furthest,(p.body.position.x-s.x)*s.nx+(p.body.position.z-s.z)*s.nz);}
   assert.ok(furthest>limit+3,`unexpected boundary at ${furthest} m`);
 });
+
