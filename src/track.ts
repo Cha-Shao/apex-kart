@@ -107,7 +107,19 @@ export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>numb
 
 export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
-export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[],colors:number[]=[];const n=track.samples.length;for(const side of [-1,1])for(let i=0;i<n;i++){const mask=side>0?track.features.left:track.features.right;if(!mask[i]&&!mask[(i+1)%n])continue;const base=vertices.length/3;for(const k of [i,(i+1)%n])for(let j=0;j<=6;j++){const s=track.samples[k],u=j/6,offset=side*(track.width/2+u*CURB_WIDTH*mask[k]),x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.025+Math.sin(u*Math.PI)*.12*mask[k],z);const red=Math.floor(track.samples[i].distance/2.15)%2===0;colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));}for(let j=0;j<6;j++){const a=base+j,b=a+7;if(side===1)indices.push(a,a+1,b,a+1,b+1,b);else indices.push(a,b,a+1,a+1,b,b+1);}}return {vertices,indices,colors};}
+export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){
+  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],n=track.samples.length;
+  for(const side of [-1,1])for(let i=0;i<n;i++){
+    const mask=side>0?track.features.left:track.features.right;if(!mask[i]&&!mask[(i+1)%n])continue;
+    const base=vertices.length/3,red=Math.floor(track.samples[i].distance/2.15)%2===0;
+    for(const k of [i,(i+1)%n])for(const u of [0,1]){
+      const s=track.samples[k],offset=side*(track.width/2+u*CURB_WIDTH*mask[k]),x=s.x+s.nx*offset,z=s.z+s.nz*offset;
+      vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.020,z);colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));
+    }
+    if(side===1)indices.push(base,base+1,base+2,base+1,base+3,base+2);else indices.push(base,base+2,base+1,base+1,base+2,base+3);
+  }
+  return {vertices,indices,colors};
+}
 
 export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:number;signedDistance:number;sample:TrackSample} {
   let best=Infinity,index=0,signedDistance=0;

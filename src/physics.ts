@@ -1,11 +1,11 @@
 import * as CANNON from 'cannon-es';
-import { bridgeHeight, curbGeometry, isOnAsphalt, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, CURB_WIDTH, isOnAsphalt, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
 import {VEHICLES,type VehicleId,type VehicleProfile} from './vehicles';
 import {AssistedVehicle} from './abs';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
-export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number }
+export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number;kerbLeft:number;kerbRight:number }
 export class KartPhysics {
   world=new CANNON.World({gravity:new CANNON.Vec3(0,-9.81,0)});
   body:CANNON.Body;
@@ -16,7 +16,7 @@ export class KartPhysics {
   terrainBody:CANNON.Body|null=null;
   roadBody:CANNON.Body|null=null;
   curbBody:CANNON.Body|null=null;
-  telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0,fourWheelsOutside:false,brakeApplied:0,absActive:false,downforce:0};
+  telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0,fourWheelsOutside:false,brakeApplied:0,absActive:false,downforce:0,kerbLeft:0,kerbRight:0};
   input:DriveInput={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   gripMultiplier=1;
   profile:VehicleProfile=VEHICLES.kart;
@@ -73,11 +73,10 @@ export class KartPhysics {
     this.terrainBody=new CANNON.Body({mass:0,shape:heightfield,position:new CANNON.Vec3(f.originX,0,f.originZ+f.size)});this.terrainBody.quaternion.setFromEuler(-Math.PI/2,0,0);this.terrainBody.updateAABB();this.world.addBody(this.terrainBody);
     if(track.bridges.length){
       const vertices:number[]=[],indices:number[]=[],count=track.samples.length;
-      for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const x=s.x+s.nx*track.width*.5*side,z=s.z+s.nz*track.width*.5*side;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
+      for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const mask=(side>0?track.features.left:track.features.right)[i],offset=(track.width*.5+(_settings.curbs?CURB_WIDTH*mask:0))*side;const x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
       for(let i=0;i<count;i++){const a=i*2,b=((i+1)%count)*2;indices.push(a,a+1,b,a+1,b+1,b);}
       const mesh=new CANNON.Trimesh(vertices,indices);this.roadBody=new CANNON.Body({mass:0,shape:mesh});this.roadBody.updateAABB();this.world.addBody(this.roadBody);
     }
-    if(_settings.curbs){const data=curbGeometry(track,(x,z)=>f.sample(x,z));if(data.vertices.length){this.curbBody=new CANNON.Body({mass:0});for(let start=0;start<data.vertices.length/3;start+=14000){const end=Math.min(start+14000,data.vertices.length/3),vertices=data.vertices.slice(start*3,end*3),indices=data.indices.filter((_,i,all)=>all[Math.floor(i/3)*3]>=start&&all[Math.floor(i/3)*3]<end).map(i=>i-start);this.curbBody.addShape(new CANNON.Trimesh(vertices,indices));}this.curbBody.updateAABB();this.world.addBody(this.curbBody);}}
     this.reset();
   }
   reset(index=0){
@@ -89,7 +88,7 @@ export class KartPhysics {
     this.body.previousPosition.copy(this.body.position);this.body.interpolatedPosition.copy(this.body.position);this.body.previousQuaternion.copy(this.body.quaternion);this.body.interpolatedQuaternion.copy(this.body.quaternion);
     this.body.aabbNeedsUpdate=true;this.body.wakeUp();this.steer=0;this.brake=0;this.gear=1;this.lastForward=0;this.lastLateral=0;this.accumulator=0;this.telemetry.speed=0;this.telemetry.signedSpeed=0;this.telemetry.rpm=this.profile.idleRPM;this.telemetry.gear=0;
     this.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
-    this.vehicle.resetABS();this.telemetry.brakeApplied=0;this.telemetry.absActive=false;this.telemetry.downforce=0;
+    this.vehicle.resetABS();this.telemetry.brakeApplied=0;this.telemetry.absActive=false;this.telemetry.downforce=0;this.telemetry.kerbLeft=0;this.telemetry.kerbRight=0;
     for(let i=0;i<4;i++){this.vehicle.setBrake(0,i);this.vehicle.applyEngineForce(0,i);this.vehicle.setSteeringValue(0,i);this.vehicle.wheelInfos[i].rotation=0;}
   }
   setStaged(staged:boolean){this.staged=staged;this.body.type=staged?CANNON.Body.KINEMATIC:CANNON.Body.DYNAMIC;this.body.updateMassProperties();this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();this.body.aabbNeedsUpdate=true;this.body.wakeUp();}
@@ -98,7 +97,7 @@ export class KartPhysics {
     // The white line is part of the track. A tyre still overlapping it is inside.
     // White stripe: centre width/2-.24 m, stripe half-width .065 m.
     const whiteEdge=this.track.width/2-.175;
-    let allOutside=true;
+    let allOutside=true,kerbLeft=0,kerbRight=0;
     for(let i=0;i<4;i++){
       const wheel=this.vehicle.wheelInfos[i],contact=wheel.isInContact;
       this.vehicle.updateWheelTransform(i);wheel.isInContact=contact;
@@ -108,7 +107,13 @@ export class KartPhysics {
       const halfTread=(i<2?this.profile.frontTyreWidth:this.profile.rearTyreWidth)*.5;
       const overlap=halfTread*Math.abs(this.trackLimitAxle.x*near.sample.nx+this.trackLimitAxle.z*near.sample.nz);
       if(near.distance-overlap<=whiteEdge+.005)allOutside=false;
+      if(contact&&this.track.curbs){
+        const mask=(near.signedDistance>=0?this.track.features.left:this.track.features.right)[near.index],inner=this.track.width/2,outer=inner+CURB_WIDTH*mask;
+        const coverage=Math.max(0,Math.min(near.distance+overlap,outer)-Math.max(near.distance-overlap,inner))/Math.max(.02,overlap*2);
+        if(i%2===0)kerbLeft+=coverage*.5;else kerbRight+=coverage*.5;
+      }
     }
+    this.telemetry.kerbLeft=Math.min(1,kerbLeft);this.telemetry.kerbRight=Math.min(1,kerbRight);
     this.telemetry.fourWheelsOutside=allOutside;
     this.trackLimitsExceeded ||= allOutside;
   }

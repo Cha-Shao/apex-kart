@@ -93,7 +93,7 @@ export class GameScene {
       }
 
     }
-    if(settings.curbs){const data=curbGeometry(track,(x,z)=>this.terrain.sample(x,z)),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setIndex(data.indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.8,side:THREE.DoubleSide}));mesh.receiveShadow=true;mesh.castShadow=true;this.circuit.add(mesh);}
+    if(settings.curbs){const data=curbGeometry(track,(x,z)=>this.terrain.sample(x,z)),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setIndex(data.indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.8,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4}));mesh.receiveShadow=true;mesh.castShadow=false;mesh.renderOrder=2;this.circuit.add(mesh);}
     // Checkered grid and a real start gantry aligned to the first track tangent.
     const start=track.samples[0],yaw=Math.atan2(-start.tx,-start.tz),grid=new THREE.Group();grid.position.set(start.x,this.terrain.sample(start.x,start.z)+bridgeHeight(track,0)+.03,start.z);grid.rotation.y=yaw;this.circuit.add(grid);
     for(let row=0;row<3;row++)for(let col=0;col<Math.ceil(track.width/.62);col++)this.box(grid,-half+.31+col*.62,.005,(row-1)*.62,.62,.012,.62,(row+col)%2===0?0xf4f1e1:0x263738);

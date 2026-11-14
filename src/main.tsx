@@ -218,7 +218,7 @@ function animate(now:number){
         if(!Number.isFinite(physics.body.position.y)||physics.body.position.y< -90)resetKart();
       }
     }else if(!running){physics.input={throttle:0,brake:.4,steer:0,handbrake:false,reverse:false};physics.step(dt);}
-    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!countingDown);
+    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!countingDown,physics.telemetry.speed,physics.telemetry.kerbLeft,physics.telemetry.kerbRight);
     hudElapsed+=dt;if(hudElapsed>.05){if(running)updateHUD();hudElapsed=0;}
   }
   fpsAccum+=dt;fpsFrames++;if(fpsAccum>1){$('#fps').textContent=`${Math.round(fpsFrames/fpsAccum)} FPS`;fpsAccum=0;fpsFrames=0;}
