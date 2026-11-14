@@ -21,6 +21,8 @@ export class GameScene {
   physics:KartPhysics;
   track!:TrackData;
   mode:CameraMode='orbit';
+  tyreSquealLeft=0;
+  tyreSquealRight=0;
   private target=new THREE.Vector3();
   private desired=new THREE.Vector3();
   private resizeObserver:ResizeObserver;
@@ -186,11 +188,17 @@ export class GameScene {
       }
       this.camera.updateProjectionMatrix();
     }
+    this.tyreSquealLeft=0;this.tyreSquealRight=0;
     if(running&&this.physics.telemetry.speed>12){
       let changed=false;
       for(let j=0;j<2;j++){
         const w=this.physics.vehicle.wheelInfos[j+2];
-        if(w.isInContact&&(this.physics.input.handbrake||w.skidInfo<.7)&&!this.physics.telemetry.offroad){
+        const handbrake=this.physics.profile.id==='kart'&&this.physics.input.handbrake;
+        if(w.isInContact&&(handbrake||w.skidInfo<.7)&&!this.physics.telemetry.offroad){
+          // Share the exact mark trigger; sound follows current sliding, not
+          // old rubber already on the road. No extra track/contact queries.
+          const intensity=handbrake?.85:.18+.82*Math.max(0,Math.min(1,(.7-w.skidInfo)/.7));
+          if(j===0)this.tyreSquealLeft=intensity;else this.tyreSquealRight=intensity;
           const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
           if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
           const q=w.worldTransform.quaternion,side=new THREE.Vector3(1,0,0).applyQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w));
