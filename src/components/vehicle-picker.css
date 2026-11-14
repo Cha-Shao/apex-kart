@@ -1,0 +1,188 @@
+.vehicle-picker__silhouette svg.vehicle-picker__silhouette--kart{stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round}
+.vehicle-picker__silhouette svg.vehicle-picker__silhouette--rb20{stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
+.vehicle-picker {
+  --vehicle-picker-bg: #111315;
+  --vehicle-picker-panel: #1a1d1f;
+  --vehicle-picker-line: #34383a;
+  --vehicle-picker-muted: #92999b;
+  --vehicle-picker-text: #f1f2ee;
+  --vehicle-picker-accent: #f4d21f;
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 24px;
+  color: var(--vehicle-picker-text);
+  font-family: Inter, "Arial Narrow", Arial, sans-serif;
+}
+
+.vehicle-picker *,
+.vehicle-picker *::before,
+.vehicle-picker *::after {
+  box-sizing: border-box;
+}
+
+.vehicle-picker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  color: var(--vehicle-picker-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.vehicle-picker__kicker {
+  color: var(--vehicle-picker-accent);
+}
+
+.vehicle-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vehicle-picker__card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 13px 13px 11px;
+  border: 1px solid var(--vehicle-picker-line);
+  border-radius: 0;
+  background: var(--vehicle-picker-panel);
+  color: var(--vehicle-picker-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.vehicle-picker__card:hover {
+  border-color: #777d7d;
+}
+
+.vehicle-picker__card:focus-visible {
+  outline: 2px solid var(--vehicle-picker-accent);
+  outline-offset: 3px;
+}
+
+.vehicle-picker__card--selected {
+  border-color: var(--vehicle-picker-accent);
+  background: #20211b;
+  box-shadow: inset 3px 0 0 var(--vehicle-picker-accent);
+}
+
+.vehicle-picker__card-top,
+.vehicle-picker__meta,
+.vehicle-picker__select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vehicle-picker__eyebrow,
+.vehicle-picker__number {
+  color: var(--vehicle-picker-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.vehicle-picker__number {
+  color: #606768;
+}
+
+.vehicle-picker__silhouette {
+  display: flex;
+  height: 62px;
+  align-items: center;
+  justify-content: center;
+  margin: 5px 0 7px;
+  color: #d4d8d3;
+}
+
+.vehicle-picker__silhouette svg {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+
+.vehicle-picker__silhouette circle {
+  fill: var(--vehicle-picker-panel);
+}
+
+.vehicle-picker__card--selected .vehicle-picker__silhouette {
+  color: var(--vehicle-picker-accent);
+}
+
+.vehicle-picker__card--selected .vehicle-picker__silhouette circle {
+  fill: #20211b;
+}
+
+.vehicle-picker__name {
+  overflow: hidden;
+  color: var(--vehicle-picker-text);
+  font-size: clamp(12px, 1.3vw, 15px);
+  font-weight: 900;
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vehicle-picker__meta {
+  justify-content: flex-start;
+  min-height: 25px;
+  color: var(--vehicle-picker-muted);
+  font-size: 9px;
+}
+
+.vehicle-picker__weight {
+  color: #d5d8d3;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.vehicle-picker__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vehicle-picker__select {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vehicle-picker-line);
+  color: var(--vehicle-picker-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.vehicle-picker__card--selected .vehicle-picker__select {
+  border-color: #635b20;
+  color: var(--vehicle-picker-accent);
+}
+
+@media (max-width: 420px) {
+  .vehicle-picker__grid {
+    gap: 7px;
+  }
+
+  .vehicle-picker__card {
+    padding: 10px 9px;
+  }
+
+  .vehicle-picker__meta {
+    flex-wrap: wrap;
+    gap: 2px 6px;
+  }
+}

@@ -1,4 +1,6 @@
+import {VEHICLES,type VehicleId} from './vehicles';
 export class EngineAudio {
+  private vehicle:VehicleId='kart';
   private context:AudioContext|null=null;
   private engine:AudioWorkletNode|null=null;
   private loading:Promise<void>|null=null;
@@ -11,5 +13,6 @@ export class EngineAudio {
   }
   async setEnabled(enabled:boolean){if(enabled){this.context??=new AudioContext();await this.context.resume();await this.initialize();}this.enabled=enabled;this.engine?.port.postMessage({enabled,running:false});return enabled;}
   async toggle(){return this.setEnabled(!this.enabled);}
-  update(rpm:number,throttle:number,running:boolean){this.engine?.port.postMessage({rpm:Math.max(1450,Math.min(4600,rpm)),throttle,running,enabled:this.enabled});}
+  setVehicle(id:VehicleId){this.vehicle=id;this.engine?.port.postMessage({vehicle:id,enabled:this.enabled,running:false});}
+  update(rpm:number,throttle:number,running:boolean){const spec=VEHICLES[this.vehicle];this.engine?.port.postMessage({vehicle:this.vehicle,rpm:Math.max(spec.idleRPM,Math.min(spec.maxRPM,rpm)),throttle,running,enabled:this.enabled});}
 }

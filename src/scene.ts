@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeKart } from './kart';
+import { makeRB20 } from './rb20';
 import { KartPhysics } from './physics';
 import { bridgeHeight, curbGeometry, runoffGeometry, CURB_WIDTH, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
-import {KART_SPEC} from './kart-spec';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -13,7 +13,7 @@ export class GameScene {
   scene=new THREE.Scene();
   camera=new THREE.PerspectiveCamera(45,1,1,1400);
   orbit:OrbitControls;
-  kart=makeKart();
+  kart:ReturnType<typeof makeKart>&{updateDashboard?:(gear:number,rpm:number)=>void};
   circuit=new THREE.Group();
   scenery=new THREE.Group();
   landscape=new THREE.Group();
@@ -33,6 +33,7 @@ export class GameScene {
   onContextLost=()=>{};
   constructor(public container:HTMLElement,physics:KartPhysics){
     this.physics=physics;
+    this.kart=physics.profile.id==='rb20'?makeRB20():makeKart();
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.75));
     this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -51,6 +52,11 @@ export class GameScene {
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
   }
   resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.track&&this.mode==='orbit')this.frameTrack();}
+  setVehicle(){
+    for(const group of [this.kart.root,...this.kart.wheelMeshes]){this.scene.remove(group);this.clearGroup(group);}
+    this.kart=this.physics.profile.id==='rb20'?makeRB20():makeKart();this.scene.add(this.kart.root,...this.kart.wheelMeshes);
+    this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.setCamera(this.mode);this.renderer.shadowMap.needsUpdate=true;
+  }
   private clearGroup(group:THREE.Group){group.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.map)m.map.dispose();m.dispose();}}});group.clear();}
   private ribbon(track:TrackData,offset:number,width:number,y:number,color:number,filter?:(i:number)=>boolean){
     const positions:number[]=[],indices:number[]=[],n=track.samples.length;
@@ -80,10 +86,10 @@ export class GameScene {
       this.ribbon(track,side*(half-.24),.13,.026,0xe5e8d7);
       if(settings.curbs){
         // Kerbs only follow a turn: the apex edge and outer exit are selected by signed curvature.
-        const curb=(i:number)=>Math.abs(track.samples[i].curvature)>.009;
+
         
         
-        this.ribbon(track,side*(half+CURB_WIDTH+.25),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>.024&&Math.sign(track.samples[i].curvature)===side);
+        this.ribbon(track,side*(half+CURB_WIDTH+.25),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>track.features.threshold*2.6&&Math.sign(track.samples[i].curvature)===side);
       }
 
     }
@@ -98,7 +104,26 @@ export class GameScene {
     const back=this.sign('APEX  /  KART CLUB',track.width+2.9,.83);back.position.set(0,5.48,-.25);back.rotation.y=Math.PI;grid.add(back);
     for(let i=0;i<5;i++){const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,8,8),new THREE.MeshStandardMaterial({color:0xc5ef4e,emissive:0x486612,emissiveIntensity:.5}));lamp.position.set((i-2)*.44,4.68,0);grid.add(lamp);}
     for(const bridge of track.bridges){const s=track.samples[bridge.index],height=bridge.height;for(const side of [-1,1]){const x=s.x+s.nx*(half+.4)*side,z=s.z+s.nz*(half+.4)*side;this.box(this.circuit,x,this.terrain.sample(x,z)+height/2,z,.35,height,.35,0x73877c);}}
-    this.addScenery();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;this.frameTrack();
+    this.addScenery();this.addBrakeBoards();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;this.frameTrack();
+  }
+  private addBrakeBoards(){
+    const track=this.track,n=track.samples.length,step=track.length/n,placed:THREE.Vector3[]=[];
+    for(const corner of track.features.corners){
+      const distances=track.length>2200?[150,100,50]:[75,50,25];
+      for(const metres of distances){
+        if(corner.approach<metres+8)continue;
+        const index=(corner.start-Math.round(metres/step)+n)%n,s=track.samples[index],offset=track.width/2+CURB_WIDTH+2;
+        const x=s.x+s.nx*offset*corner.side,z=s.z+s.nz*offset*corner.side,y=this.terrain.sample(x,z)+bridgeHeight(track,index);
+        const p=new THREE.Vector3(x,y,z);if(placed.some(v=>v.distanceTo(p)<12))continue;placed.push(p);
+        const board=new THREE.Group();board.position.copy(p);board.rotation.y=Math.atan2(-s.tx,-s.tz);this.scenery.add(board);
+        const canvas=document.createElement('canvas');canvas.width=192;canvas.height=256;const c=canvas.getContext('2d')!;
+        c.fillStyle='#f5f3e7';c.fillRect(0,0,192,256);c.strokeStyle='#171b19';c.lineWidth=9;c.strokeRect(5,5,182,246);c.fillStyle='#131714';c.font='bold 84px Arial';c.textAlign='center';c.textBaseline='middle';c.fillText(String(metres),96,114);c.font='bold 30px Arial';c.fillText('m',96,192);
+        const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;
+        const plate=new THREE.Mesh(new THREE.BoxGeometry(.96,1.28,.055),material(0xe6e6d9));plate.position.y=1.3;plate.castShadow=true;board.add(plate);
+        for(const side of [-1,1]){const face=new THREE.Mesh(new THREE.PlaneGeometry(.94,1.26),new THREE.MeshBasicMaterial({map}));face.position.set(0,1.3,side*.03);if(side<0)face.rotation.y=Math.PI;board.add(face);}
+        this.box(board,0,.38,0,.055,.76,.055,0x7e8981);
+      }
+    }
   }
   private addScenery(){
     const b=this.track.bounds;
@@ -136,24 +161,26 @@ export class GameScene {
     this.orbit.target.copy(center);this.camera.position.copy(center).add(new THREE.Vector3(size*.57*scale,size*.90*scale,size*.94*scale));this.camera.lookAt(center);this.orbit.update();
     const fog=this.scene.fog as THREE.Fog,range=this.camera.position.distanceTo(center);fog.near=Math.max(450,range*.95);fog.far=Math.max(1000,range*2.5);this.camera.near=Math.max(1,range/2000);this.camera.far=Math.max(1400,range*4);this.camera.updateProjectionMatrix();
   }
-  setCamera(mode:CameraMode){this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.Fog;fog.near=400;fog.far=950;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3(0,4.2,7.4).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
+  setCamera(mode:CameraMode){this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.Fog;fog.near=400;fog.far=950;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
     const body=this.physics.body;this.kart.root.quaternion.copy(body.quaternion as any);this.target.set(0,this.physics.visualOffset,0).applyQuaternion(this.kart.root.quaternion);this.kart.root.position.copy(body.position as any).add(this.target);
-    this.kart.steering.rotation.z=this.physics.telemetry.steering*1.8;
+    this.kart.steering.rotation.z=this.physics.telemetry.steering*this.physics.profile.steeringRatio;
+    this.kart.updateDashboard?.(this.physics.telemetry.gear??0,this.physics.telemetry.rpm);
     this.kart.wheelMeshes.forEach((w,i)=>{const t=this.physics.vehicle.wheelInfos[i].worldTransform;w.position.copy(t.position as any);w.quaternion.copy(t.quaternion as any);});
     if(this.mode==='orbit')this.orbit.update();
     else{
       const q=this.kart.root.quaternion,p=this.kart.root.position;
       if(this.mode==='chase'){
-        this.desired.set(0,4.2,7.4).applyQuaternion(q).add(p);this.target.set(0,.7,-4.5).applyQuaternion(q).add(p);
+        this.desired.fromArray(this.physics.profile.chase).applyQuaternion(q).add(p);this.target.set(0,.7,-4.5).applyQuaternion(q).add(p);
         this.camera.position.lerp(this.desired,1-Math.exp(-dt*4.5));this.camera.lookAt(this.target);this.camera.fov=53+Math.min(this.physics.telemetry.speed/12,7);
       }else if(this.mode==='cockpit'){
         // Eye height, downward gaze and a wide lower field keep the real
         // steering wheel, hands and both front tyres visible in the scene.
-        this.desired.set(0,.80,.20).applyQuaternion(q).add(p);this.target.set(0,.80-12*.32,.20-12).applyQuaternion(q).add(p);
-        this.camera.position.copy(this.desired);this.camera.lookAt(this.target);this.camera.fov=Math.max(82,Math.min(108,THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(42))/this.camera.aspect))));
+        const spec=this.physics.profile;
+        this.desired.fromArray(spec.cockpitEye).applyQuaternion(q).add(p);this.target.fromArray(spec.cockpitGaze).applyQuaternion(q).add(p);
+        this.camera.position.copy(this.desired);this.camera.lookAt(this.target);this.camera.fov=Math.max(spec.cockpitFov,Math.min(108,THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(42))/this.camera.aspect))));
       }else{
         this.desired.copy(p).add(new THREE.Vector3(.01,85,30));this.camera.position.lerp(this.desired,1-Math.exp(-dt*4));this.camera.lookAt(p);this.camera.fov=48;
       }
@@ -167,9 +194,9 @@ export class GameScene {
           const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
           if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
           const q=w.worldTransform.quaternion,side=new THREE.Vector3(1,0,0).applyQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w));
-          side.addScaledVector(normal,-side.dot(normal)).normalize().multiplyScalar(.29*KART_SPEC.artScale.x*.675);
+          side.addScaledVector(normal,-side.dot(normal)).normalize().multiplyScalar(this.physics.profile.rearTyreWidth*.675);
           const left=center.clone().add(side),right=center.clone().sub(side),previous=this.previousSkid[j];
-          if(previous){const distance=previous.center.distanceTo(center);if(distance<.02)continue;if(distance<2){
+          if(previous){const distance=previous.center.distanceTo(center);if(distance<.02)continue;if(distance<Math.max(2,this.physics.telemetry.speed/3.6*dt*1.8)){
             const offset=this.skidCursor*18;this.skidPositions.set([...previous.left.toArray(),...previous.right.toArray(),...left.toArray(),...previous.right.toArray(),...right.toArray(),...left.toArray()],offset);
             (this.skidMarks.geometry.getAttribute('position') as THREE.BufferAttribute).addUpdateRange(offset,18);this.skidCursor=(this.skidCursor+1)%4096;this.skidCount=Math.min(4096,this.skidCount+1);changed=true;
           }}
