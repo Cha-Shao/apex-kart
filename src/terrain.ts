@@ -82,7 +82,7 @@ export class TerrainPainter {
   draw(){
     const c=this.ctx;c.clearRect(0,0,800,600);if(!this.visible&&!this.active)return;
     const f=this.field,n=f.resolution;this.map.width=n;this.map.height=n;const m=this.map.getContext('2d')!,img=m.createImageData(n,n);
-    for(let i=0;i<f.heights.length;i++){const h=f.heights[i],a=Math.min(.65,Math.abs(h)/15*.6);img.data[i*4]=h>=0?235:76;img.data[i*4+1]=h>=0?164:175;img.data[i*4+2]=h>=0?78:225;img.data[i*4+3]=Math.round(a*255);}
+    for(let i=0;i<f.heights.length;i++){const h=f.heights[i],a=Math.min(.9,Math.abs(h)/15*1.2);img.data[i*4]=h>=0?235:76;img.data[i*4+1]=h>=0?164:175;img.data[i*4+2]=h>=0?78:225;img.data[i*4+3]=Math.round(a*255);}
     m.putImageData(img,0,0);const a=this.project({x:f.originX,z:f.originZ}),b=this.project({x:f.originX+f.size,z:f.originZ+f.size});c.imageSmoothingEnabled=true;c.drawImage(this.map,a.x,a.y,b.x-a.x,b.y-a.y);
     if(this.pointer&&this.active){const p=this.project(this.pointer),edge=this.project({x:this.pointer.x+this.radius,z:this.pointer.z}),r=Math.abs(edge.x-p.x),g=c.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#e7c78630');g.addColorStop(1,'#e7c78600');c.fillStyle=g;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.strokeStyle='#f1dfaa';c.lineWidth=1.7;c.setLineDash([6,5]);c.stroke();c.setLineDash([]);c.beginPath();c.arc(p.x,p.y,3,0,Math.PI*2);c.fillStyle='#fff2c7';c.fill();}
   }

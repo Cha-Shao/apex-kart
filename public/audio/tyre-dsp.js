@@ -1,89 +1,50 @@
+// Original noise-excited rubber friction, with broad non-harmonic resonances.
+// No continuous sine-wave whistle and no external audio samples.
+class FrictionBand {
+  constructor(){this.z1=0;this.z2=0;this.b0=0;this.b2=0;this.a1=0;this.a2=0;}
+  tune(sr,hz,q){const w=2*Math.PI*hz/sr,alpha=Math.sin(w)/(2*q),a0=1+alpha;this.b0=alpha/a0;this.b2=-this.b0;this.a1=-2*Math.cos(w)/a0;this.a2=(1-alpha)/a0;}
+  sample(x){const y=this.b0*x+this.z1;this.z1=-this.a1*y+this.z2;this.z2=this.b2*x-this.a2*y;return y;}
+}
 export class TyreSqueal {
-  constructor(sampleRate = 48000) {
-    this.sampleRate = sampleRate;
-    this.speed = 0;
-    this.squealLeft = 0;
-    this.squealRight = 0;
-    this.running = false;
-    this.enabled = false;
-    this.leftTarget = 0;
-    this.rightTarget = 0;
-    this.leftGain = 0;
-    this.rightGain = 0;
-    this.leftPhase = 0;
-    this.rightPhase = 0;
-    this.leftOvertonePhase = 0;
-    this.rightOvertonePhase = 0;
-    this.leftHarmonicPhase = 0;
-    this.rightHarmonicPhase = 0;
-    this.noiseState = 0x3c6ef372;
-    this.noiseLow = 0;
-    this.noisePrev = 0;
+  constructor(sampleRate=48000){
+    this.sampleRate=sampleRate;this.speed=0;this.slipL=0;this.slipR=0;
+    this.targetL=0;this.targetR=0;this.gainL=0;this.gainR=0;
+    this.seed=0x3c6ef372;this.jitter=0;this.jitterTarget=0;this.grain=0;this.grainTarget=0;this.grainClock=0;
+    this.lowL=0;this.lowR=0;this.highL=0;this.highR=0;
+    this.bandsL=[new FrictionBand(),new FrictionBand(),new FrictionBand()];
+    this.bandsR=[new FrictionBand(),new FrictionBand(),new FrictionBand()];
   }
-
-  set({ speed = 0, squealLeft = 0, squealRight = 0, running = false, enabled = false } = {}) {
-    this.speed = Math.max(0, speed);
-    this.squealLeft = Math.max(0, Math.min(1, squealLeft));
-    this.squealRight = Math.max(0, Math.min(1, squealRight));
-    this.running = !!running;
-    this.enabled = !!enabled;
-    const active = this.enabled && this.running && this.speed > 12;
-    const speedLevel = Math.min(1, (this.speed - 12) / 70);
-    const scale = active ? (0.022 + speedLevel * 0.065) : 0;
-    this.leftTarget = this.squealLeft * scale;
-    this.rightTarget = this.squealRight * scale;
+  noise(){this.seed=(Math.imul(this.seed,1664525)+1013904223)|0;return (this.seed>>>0)/2147483648-1;}
+  set({speed=0,squealLeft=0,squealRight=0,running=false,enabled=false}={}){
+    this.speed=Math.max(0,speed);this.slipL=Math.max(0,Math.min(1,squealLeft));this.slipR=Math.max(0,Math.min(1,squealRight));
+    const active=running&&enabled&&this.speed>12,volume=.10+.15*Math.min(1,Math.max(0,(this.speed-12)/100));
+    this.targetL=active?this.slipL*volume:0;this.targetR=active?this.slipR*volume:0;
   }
-
-  mix(left, right) {
-    const count = Math.min(left.length, right.length);
-    const attack = 1 / Math.max(1, this.sampleRate * 0.025);
-    const release = 1 / Math.max(1, this.sampleRate * 0.1);
-    const active = this.enabled && this.running && this.speed > 12;
-    const speedLevel = Math.min(1, Math.max(0, (this.speed - 12) / 70));
-    const baseHz = 650 + speedLevel * 560;
-    const vibratoHz = 3.2 + speedLevel * 1.8;
-    const phaseStep = 2 * Math.PI * baseHz / this.sampleRate;
-    const harmonicStep = 2 * Math.PI * (baseHz * 1.47) / this.sampleRate;
-    const vibratoStep = 2 * Math.PI * vibratoHz / this.sampleRate;
-    const noiseBlend = 0.18;
-
-    for (let i = 0; i < count; i++) {
-      const leftDiff = this.leftTarget - this.leftGain;
-      const rightDiff = this.rightTarget - this.rightGain;
-      this.leftGain += leftDiff * (leftDiff > 0 ? attack : release);
-      this.rightGain += rightDiff * (rightDiff > 0 ? attack : release);
-
-      this.noiseState = (Math.imul(this.noiseState, 1664525) + 1013904223) >>> 0;
-      const white = this.noiseState / 2147483648 - 1;
-      this.noiseLow += (white - this.noiseLow) * 0.14;
-      const friction = white - this.noiseLow - this.noisePrev * 0.12;
-      this.noisePrev = white;
-
-      let leftTone = 0;
-      let rightTone = 0;
-      if (active || this.leftGain > 0.0001 || this.rightGain > 0.0001) {
-        const tremolo = 1 + 0.07 * Math.sin(this.leftHarmonicPhase);
-        leftTone = tremolo * (0.68 * Math.sin(this.leftPhase) + 0.32 * Math.sin(this.leftOvertonePhase));
-        const rightTremolo = 1 + 0.07 * Math.sin(this.rightHarmonicPhase);
-        rightTone = rightTremolo * (0.68 * Math.sin(this.rightPhase) + 0.32 * Math.sin(this.rightOvertonePhase));
-        this.leftPhase += phaseStep * (1 + 0.025 * Math.sin(this.leftHarmonicPhase));
-        this.rightPhase += phaseStep * (1 + 0.025 * Math.sin(this.rightHarmonicPhase));
-        this.leftOvertonePhase = (this.leftOvertonePhase + harmonicStep) % (2 * Math.PI);
-        this.rightOvertonePhase = (this.rightOvertonePhase + harmonicStep * 1.006) % (2 * Math.PI);
-        this.leftHarmonicPhase += vibratoStep;
-        this.rightHarmonicPhase += vibratoStep * 1.013;
-        if (this.leftPhase >= 2 * Math.PI) this.leftPhase -= 2 * Math.PI;
-        if (this.rightPhase >= 2 * Math.PI) this.rightPhase -= 2 * Math.PI;
-        if (this.leftHarmonicPhase >= 2 * Math.PI) this.leftHarmonicPhase -= 2 * Math.PI;
-        if (this.rightHarmonicPhase >= 2 * Math.PI) this.rightHarmonicPhase -= 2 * Math.PI;
-      }
-
-      const leftSqueal = leftTone * (1 - noiseBlend) + friction * noiseBlend;
-      const rightSqueal = rightTone * (1 - noiseBlend) + friction * noiseBlend;
-      const l = left[i] + this.leftGain * leftSqueal + this.rightGain * rightSqueal * 0.2;
-      const r = right[i] + this.rightGain * rightSqueal + this.leftGain * leftSqueal * 0.2;
-      left[i] = Math.max(-1, Math.min(1, l));
-      right[i] = Math.max(-1, Math.min(1, r));
+  mix(left,right){
+    const sr=this.sampleRate,count=left.length;
+    if(this.targetL===0&&this.targetR===0&&this.gainL<1e-6&&this.gainR<1e-6)return;
+    const attack=1-Math.exp(-1/(sr*.035)),release=1-Math.exp(-1/(sr*.12));
+    const speed=Math.min(1,this.speed/180),slip=Math.max(this.slipL,this.slipR),shift=1+this.jitter*.035;
+    const fundamental=(480+110*slip+45*speed)*shift,q=2.4+slip*2.8;
+    this.bandsL[0].tune(sr,fundamental,q);this.bandsL[1].tune(sr,fundamental*1.83,q*.75);this.bandsL[2].tune(sr,fundamental*3.17,1.8);
+    this.bandsR[0].tune(sr,fundamental*1.025,q);this.bandsR[1].tune(sr,fundamental*1.79,q*.8);this.bandsR[2].tune(sr,fundamental*3.09,1.8);
+    const low=1-Math.exp(-2*Math.PI*110/sr),high=1-Math.exp(-2*Math.PI*3200/sr),slow=1-Math.exp(-1/(sr*.025));
+    for(let i=0;i<count;i++){
+      this.gainL+=(this.targetL-this.gainL)*(this.targetL>this.gainL?attack:release);
+      this.gainR+=(this.targetR-this.gainR)*(this.targetR>this.gainR?attack:release);
+      if(--this.grainClock<=0){this.grainClock=Math.floor(sr*(.018+.009*(this.noise()+1)));this.grainTarget=this.noise();this.jitterTarget=this.noise();}
+      this.grain+=(this.grainTarget-this.grain)*slow;this.jitter+=(this.jitterTarget-this.jitter)*slow;
+      const noiseL=this.noise(),noiseR=this.noise();
+      this.lowL+=(noiseL-this.lowL)*low;this.lowR+=(noiseR-this.lowR)*low;
+      this.highL+=(noiseL-this.lowL-this.highL)*high;this.highR+=(noiseR-this.lowR-this.highR)*high;
+      const exciterL=this.highL,exciterR=this.highR;
+      const rubL=this.bandsL[0].sample(exciterL)*2.5+this.bandsL[1].sample(exciterL)*1.6+this.bandsL[2].sample(exciterL)*.65;
+      const rubR=this.bandsR[0].sample(exciterR)*2.5+this.bandsR[1].sample(exciterR)*1.6+this.bandsR[2].sample(exciterR)*.65;
+      const modulation=.8+this.grain*.25;
+      const l=Math.tanh((rubL+exciterL*.14+this.lowL*.5)*1.25)*this.gainL*modulation;
+      const r=Math.tanh((rubR+exciterR*.14+this.lowR*.5)*1.25)*this.gainR*modulation;
+      left[i]=Math.max(-1,Math.min(1,left[i]+l+r*.18));
+      if(right)right[i]=Math.max(-1,Math.min(1,right[i]+r+l*.18));
     }
   }
 }

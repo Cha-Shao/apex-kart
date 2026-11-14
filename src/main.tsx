@@ -1,12 +1,14 @@
 import './style.css';
 import './broadcast.css';
+import './gamepad.css';
+import {GamepadController} from './gamepad';
 import './reference-image.css';
 import {ReferenceImageLayer} from './reference-image';
 import {SectorTiming} from './timing';
 import {mountLapTimes} from './components/LapTimes';
 import {mountVehiclePicker} from './components/VehiclePicker';
 import {type VehicleId} from './vehicles';
-import { createIcons, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, CircleHelp, Flag, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Shield, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
+import { createIcons, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Flag, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Shield, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
 import { buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, PRESETS, type Point, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
 import { TrackEditor } from './editor';
 import { KartPhysics } from './physics';
@@ -18,7 +20,7 @@ import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
 import {circuitTerrain} from './preset-terrain';
 import {fantasyTerrain} from './fantasy-terrain';
 
-const iconSet={ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Check,ChevronDown,CircleHelp,Flag,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Shield,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
+const iconSet={ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Flag,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Shield,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
 const icons=()=>createIcons({icons:iconSet,attrs:{'stroke-width':1.6}});
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const formatTime=(seconds:number)=>{if(!Number.isFinite(seconds))return '—:——.———';const m=Math.floor(seconds/60),s=Math.floor(seconds%60),cs=Math.floor(seconds%1*1000);return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(3,'0')}`;};
@@ -29,7 +31,7 @@ $('#app').innerHTML=`
 <header class="topbar">
   <a class="brand" href="#" aria-label="APEX 首页"><span class="brand-mark"><svg viewBox="0 0 36 36"><path d="M4 29 16 6h6l11 23h-8l-6-15-4 8h7l3 7Z"/></svg></span><span class="wordmark">APEX<span class="brand-separator">/</span><span class="brand-sub">卡丁车实验室</span></span></a>
   <nav class="main-nav" aria-label="工作模式"><button class="nav-button" id="drive-tab"><i data-lucide="gauge"></i>自由试驾</button><button class="nav-button active" id="editor-tab"><i data-lucide="pencil"></i>赛道工坊<span class="new-tag">BETA</span></button></nav>
-  <div class="header-actions"><button class="icon-button" id="sound-button" aria-label="开启引擎声音" title="引擎声音"><i data-lucide="volume-x"></i></button><button class="icon-button" id="help-button" aria-label="操作说明" title="操作说明"><i data-lucide="circle-help"></i></button><span class="divider"></span><button class="save-button" id="save-button"><i data-lucide="save"></i><span>保存赛道</span></button></div>
+  <div class="header-actions"><button type="button" id="gamepad-status" class="icon-button gamepad-status" data-state="waiting" aria-label="手柄：按任意键识别，点击查看操作说明" title="手柄：按任意键识别；点击查看操作说明"><i data-lucide="gamepad-2"></i><span class="gamepad-label">手柄</span></button><button class="icon-button" id="sound-button" aria-label="开启引擎声音" title="引擎声音"><i data-lucide="volume-x"></i></button><button class="icon-button" id="help-button" aria-label="操作说明" title="操作说明"><i data-lucide="circle-help"></i></button><span class="divider"></span><button class="save-button" id="save-button"><i data-lucide="save"></i><span>保存赛道</span></button></div>
 </header>
 <main class="workspace">
   <section class="viewport" aria-label="赛道 3D 视图">
@@ -75,7 +77,7 @@ $('#app').innerHTML=`
 </main>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file-input" accept="application/json,.json" hidden/>
-<dialog id="help-dialog"><div class="dialog-head"><div><span class="eyebrow">A QUICK PIT STOP</span><h2>准备好，向弯心出发。</h2></div><button class="icon-button close-help" aria-label="关闭说明"><i data-lucide="x"></i></button></div><div class="help-columns"><div><h3>驾驶控制</h3><p><kbd>W</kbd><kbd>↑</kbd><span>加速</span></p><p><kbd>S</kbd><kbd>↓</kbd><span>刹车 · 停稳后倒车</span></p><p><kbd>A</kbd><kbd>D</kbd><span>左 / 右转向</span></p><p><kbd>Space</kbd><span>手刹漂移</span></p><p><kbd>R</kbd><span>在最近路段复位</span></p><p><kbd>C</kbd><span>切换驾驶视角</span></p><p><kbd>Esc</kbd><span>暂停 / 继续</span></p></div><div><h3>赛道工坊</h3><p class="help-text">选择画笔，在画布上一笔画出不交叉的环线。松手后自动闭合和平滑；选择控制点工具可以左键拖动、右键删点。可导入底图描线，用高度层绘制地形。</p><p class="help-text">浅青色表示直道，绿色表示缓弯，青柠色表示急弯。修改后自动同步到 3D 世界。</p><p class="help-text">保存会保留在当前浏览器；导出 JSON 可以备份或分享。手机和平板可用屏幕踏板驾驶。</p></div></div><div class="physics-note"><i data-lucide="grip"></i><span>真实刚体碰撞 + 四轮射线悬挂，包含轮胎滑移、后轮驱动与空气阻力。属于可玩的物理原型，参数尚未经实车标定。</span></div><button class="generate-button close-help">知道了，去跑一圈 <i data-lucide="arrow-up-right"></i></button></dialog>
+<dialog id="help-dialog"><div class="dialog-head"><div><span class="eyebrow">A QUICK PIT STOP</span><h2>准备好，向弯心出发。</h2></div><button class="icon-button close-help" aria-label="关闭说明"><i data-lucide="x"></i></button></div><div class="help-columns"><div><h3>驾驶控制</h3><p><kbd>W</kbd><kbd>↑</kbd><span>加速</span></p><p><kbd>S</kbd><kbd>↓</kbd><span>刹车 · 停稳后倒车</span></p><p><kbd>A</kbd><kbd>D</kbd><span>左 / 右转向</span></p><p><kbd>Space</kbd><span>手刹漂移</span></p><p><kbd>R</kbd><span>回起点并重计当前圈</span></p><p><kbd>C</kbd><span>切换驾驶视角</span></p><p><kbd>Esc</kbd><span>暂停 / 继续</span></p></div><div><h3>赛道工坊</h3><p class="help-text">选择画笔，在画布上一笔画出不交叉的环线。松手后自动闭合和平滑；选择控制点工具可以左键拖动、右键删点。可导入底图描线，用高度层绘制地形。</p><p class="help-text">浅青色表示直道，绿色表示缓弯，青柠色表示急弯。修改后自动同步到 3D 世界。</p><p class="help-text">保存会保留在当前浏览器；导出 JSON 可以备份或分享。手机和平板可用屏幕踏板驾驶。</p></div></div><div class="gamepad-help"><h3>手柄控制 · Xbox / PlayStation 标准映射</h3><p>连接后在手柄上按任意键识别，松开摇杆与扳机后即可驾驶。</p><p>左摇杆 / 十字键：转向 · RT / R2：油门 · LT / L2：刹车</p><p>A / ×：上车、继续或卡丁车手刹 · B / ○：低速倒车</p><p>Y / △：回起点 · X / □：切换视角 · Start / Options：开始或暂停 · Back / Share：返回工坊</p><p>支持模拟油门与刹车。方向盘、飞行摇杆等非标准映射暂不适用。</p></div><div class="physics-note"><i data-lucide="grip"></i><span>真实刚体碰撞 + 四轮射线悬挂，包含轮胎滑移、后轮驱动与空气阻力。属于可玩的物理原型，参数尚未经实车标定。</span></div><button class="generate-button close-help">知道了，去跑一圈 <i data-lucide="arrow-up-right"></i></button></dialog>
 <div class="error-overlay" id="error-overlay" hidden><h2>3D 场景暂时无法启动</h2><p id="error-message"></p><button onclick="location.reload()">重新加载</button></div>
 `;
 icons();
@@ -109,6 +111,8 @@ let soundTouched=false;
 let running=false,paused=false,countingDown=false,countdown=0,goDisplay=0,lapTime=0,lapNumber=1,bestTime=Infinity,checkpoint=0,lapStarted=false;
 let lastProgress=0,lastTime=performance.now(),hudElapsed=0,fpsAccum=0,fpsFrames=0;
 const keys=new Set<string>(),touchKeys=new Set<string>();
+const controller=new GamepadController();
+let previousPadStatus='waiting';
 const vehiclePicker=mountVehiclePicker($('#vehicle-picker'),selectVehicle);vehiclePicker.update(physics.profile.id);updateVehicleLabels();
 
 function updateVehicleLabels(){
@@ -165,24 +169,24 @@ function startDrive(){
   if(!game)return;if(dirty&&draftTrack)applyDraft();
   if(!currentTrack)return;
   pedals.reset();timing.reset();renderLapCard();if(!soundTouched){soundTouched=true;void audio.setEnabled(true).then(updateSoundButton).catch(()=>toast('点击顶栏声音按钮启用引擎音效。'));}
-  physics.reset();keys.clear();touchKeys.clear();running=true;paused=false;countingDown=true;countdown=3;goDisplay=0;physics.setStaged(true);lapTime=0;lapNumber=1;checkpoint=0;lapStarted=false;lastProgress=0;
+  physics.reset();controller.suspend();keys.clear();touchKeys.clear();running=true;paused=false;countingDown=true;countdown=3;goDisplay=0;physics.setStaged(true);lapTime=0;lapNumber=1;checkpoint=0;lapStarted=false;lastProgress=0;
   bestTime=Number(safeStorage.get(bestKey()))||Infinity;
-  document.body.classList.add('is-driving');setEditorVisible(false);setCamera('chase');
+  document.body.classList.add('is-driving');setEditorVisible(false);setCamera('cockpit');
   for(const id of ['session-top','driving-hud','race-actions','mobile-controls','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=false;
   for(const id of ['session-card','kart-spec'])$(`#${id}`).hidden=true;
   $('#controls-hint').innerHTML=`<span><kbd>W A S D</kbd> 驾驶</span><span>${physics.profile.id==='rb20'?'8-SPEED AUTO':'<kbd>Space</kbd> 手刹'}</span><span><kbd>R</kbd> 复位</span><span class="hint-extra"><kbd>C</kbd> 视角 <kbd>Esc</kbd> 暂停</span>`;
   $('#render-status').textContent='物理模拟运行中';$('#pause-button').innerHTML='<i data-lucide="pause"></i>';icons();
 }
 function exitDrive(){
-  running=false;paused=false;countingDown=false;physics.setStaged(false);keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
+  controller.suspend();running=false;paused=false;countingDown=false;physics.setStaged(false);keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   document.body.classList.remove('is-driving');setEditorVisible(true);setCamera('orbit');
   for(const id of ['session-top','driving-hud','race-actions','mobile-controls','center-message','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=true;
   for(const id of ['session-card','kart-spec'])$(`#${id}`).hidden=false;
   $('#controls-hint').innerHTML='<span><kbd>拖动</kbd> 旋转视角</span><span><kbd>滚轮</kbd> 缩放</span><span class="hint-extra">探索你的赛道</span>';$('#render-status').textContent='3D 实时预览';
 }
-function pause(){if(!running)return;paused=!paused;keys.clear();touchKeys.clear();$('#center-message').hidden=!paused;$('#center-message').innerHTML=paused?'<span class="pause-title">休息一拍。</span><small>按 Esc 或点击暂停键继续</small>':'';$('#pause-button').innerHTML=`<i data-lucide="${paused?'play':'pause'}"></i>`;$('#pause-button').setAttribute('aria-label',paused?'继续':'暂停');icons();}
+function pause(){if(!running)return;controller.suspend();paused=!paused;keys.clear();touchKeys.clear();$('#center-message').hidden=!paused;$('#center-message').innerHTML=paused?'<span class="pause-title">休息一拍。</span><small>按 Esc 或点击暂停键继续</small>':'';$('#pause-button').innerHTML=`<i data-lucide="${paused?'play':'pause'}"></i>`;$('#pause-button').setAttribute('aria-label',paused?'继续':'暂停');icons();}
 function resetKart(){
-  if(!running)return;physics.reset(0);if(countingDown)physics.setStaged(true);
+  if(!running)return;controller.suspend();physics.reset(0);if(countingDown)physics.setStaged(true);
   keys.clear();touchKeys.clear();pedals.reset();timing.restartLap();lapTime=0;lapStarted=false;checkpoint=0;lastProgress=0;
   game?.setCamera(game.mode);renderLapCard();updateHUD();toast('已回到起点，本圈重新计时。');
 }
@@ -197,7 +201,12 @@ $('#curbs-toggle').addEventListener('change',e=>{settings.curbs=(e.target as HTM
 function updateTerrainControls(){if(!terrainPainter)return;terrainPainter.radius=terrainPainter.field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);$('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;$('#height-range').textContent=`${terrainPainter.field.min.toFixed(1)} — ${terrainPainter.field.max.toFixed(1)} m`;}
 document.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach(b=>b.addEventListener('click',()=>{const height=b.dataset.layer==='height';terrainPainter!.setActive(height);$('#terrain-tools').hidden=!height;document.querySelectorAll('[data-layer]').forEach(x=>x.classList.toggle('selected',x===b));$('#layer-badge').textContent=height?'羽化高度笔刷':'自动平滑';}));
 document.querySelectorAll<HTMLButtonElement>('[data-brush]').forEach(b=>b.addEventListener('click',()=>{terrainPainter!.mode=b.dataset.brush as BrushMode;document.querySelectorAll('[data-brush]').forEach(x=>x.classList.toggle('selected',x===b));}));
-for(const id of ['brush-radius','brush-strength'])$(`#${id}`).addEventListener('input',updateTerrainControls);
+function syncRangeFill(input:HTMLInputElement){
+  const minimum=Number(input.min||0),maximum=Number(input.max||100),value=Number(input.value);
+  input.style.setProperty('--progress',Math.max(0,Math.min(100,(value-minimum)/Math.max(.00001,maximum-minimum)*100))+'%');
+}
+document.querySelectorAll<HTMLInputElement>('input[type="range"]').forEach(input=>{syncRangeFill(input);input.addEventListener('input',()=>syncRangeFill(input));});
+for(const id of ['brush-radius','brush-strength'])$<HTMLInputElement>('#'+id).addEventListener('input',updateTerrainControls);
 $('#height-visible').addEventListener('change',e=>{terrainPainter!.visible=(e.target as HTMLInputElement).checked;terrainPainter!.draw();});$('#undo-height').addEventListener('click',()=>terrainPainter!.undo());$('#clear-height').addEventListener('click',()=>terrainPainter!.clear());
 async function loadSelectedCircuit(){
   const c=CIRCUIT_LIBRARY.find(c=>c.id===$<HTMLSelectElement>('#circuit-select').value);if(!c){elevationLoad++;loadingElevation=false;return;}
@@ -250,7 +259,7 @@ window.addEventListener('keydown',e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)&&running)e.preventDefault();
   if(e.repeat){keys.add(e.code);return;}
   if(e.code==='Escape'){if(running)pause();return;}if(e.code==='KeyR'){resetKart();return;}
-  if(e.code==='KeyC'&&running){const modes:CameraMode[]=['chase','top','cockpit','orbit'];setCamera(modes[(modes.indexOf(game?.mode||'chase')+1)%modes.length]);return;}
+  if(e.code==='KeyC'&&running){cycleCamera();return;}
   if((e.ctrlKey||e.metaKey)&&e.code==='KeyZ'&&!running){e.preventDefault();if(terrainPainter?.active)terrainPainter.undo();else editor.undo();return;}
   keys.add(e.code);
 });window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();touchKeys.clear();if(running&&!paused)pause();});document.addEventListener('visibilitychange',()=>{if(document.hidden&&running&&!paused)pause();});
@@ -263,15 +272,41 @@ function updateLap(dt:number){
  document.querySelectorAll<HTMLElement>('[data-sector]').forEach((bar,i)=>{bar.className='sector-bar '+(i<timing.sector?timing.colors[i]:i===timing.sector?'active':'pending');bar.querySelector<HTMLElement>('i')!.style.width=Math.max(0,Math.min(1,progress*3-i))*100+'%';bar.querySelector('small')!.textContent=(timing.splits[i]??(i===timing.sector?timing.time-timing.start:0)).toFixed(3).padStart(6,'0');});
 }
 function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
+function cycleCamera(){const modes:CameraMode[]=['chase','top','cockpit','orbit'];setCamera(modes[(modes.indexOf(game?.mode||'chase')+1)%modes.length]);}
+function pollController(){
+  controller.poll();
+  if(controller.status!==previousPadStatus){
+    const button=$('#gamepad-status');button.dataset.state=controller.status;
+    const messages={waiting:'未连接：按手柄任意键识别',connected:'已连接：'+controller.name,unsupported:'已识别手柄，但浏览器未提供标准按键映射',unavailable:'当前浏览器暂不能读取手柄'};
+    button.title=messages[controller.status]+'；点击查看操作说明';button.setAttribute('aria-label',button.title);
+    if(controller.status==='connected')toast('手柄已连接：左摇杆转向，RT 油门，LT 刹车');
+    else if(previousPadStatus==='connected'){physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};if(running&&!paused)pause();toast('手柄连接已断开');}
+    previousPadStatus=controller.status;
+  }
+  const dialog=$<HTMLDialogElement>('#help-dialog');
+  if(dialog.open){if(controller.confirm||controller.start||controller.reverse){dialog.close();controller.suspend();}return;}
+  if(controller.start){if(running)pause();else startDrive();return;}
+  if(controller.confirm&&(!running||paused)){if(running)pause();else startDrive();return;}
+  if(!running)return;
+  if(controller.exit){exitDrive();return;}
+  if(controller.reset)resetKart();
+  if(controller.view)cycleCamera();
+}
+$('#gamepad-status').addEventListener('click',()=>$('#help-button').click());
 function animate(now:number){
   const dt=Math.min((now-lastTime)/1000,.06);lastTime=now;
   if(game){
+    pollController();
     if(running&&!paused){
       if(countingDown){countdown=Math.max(0,countdown-dt);if(countdown===0){countingDown=false;physics.setStaged(false);goDisplay=.8;}else{physics.step(dt);$('#center-message').hidden=false;$('#center-message').innerHTML=`<span class="countdown-number">${Math.ceil(countdown)}</span><small>找到节奏，瞄准弯心。</small>`;}}
       if(!countingDown){
         if(goDisplay>0){goDisplay-=dt;$('#center-message').hidden=false;$('#center-message').innerHTML='<span class="countdown-go">GO.</span>';}else $('#center-message').hidden=true;
         const accel=keys.has('KeyW')||keys.has('ArrowUp')||touchKeys.has('throttle'),brake=keys.has('KeyS')||keys.has('ArrowDown')||touchKeys.has('brake'),left=keys.has('KeyA')||keys.has('ArrowLeft')||touchKeys.has('left'),right=keys.has('KeyD')||keys.has('ArrowRight')||touchKeys.has('right');
-        physics.input={throttle:accel?1:0,brake:brake&&physics.telemetry.signedSpeed>1?1:0,reverse:brake&&physics.telemetry.signedSpeed<=1&&!accel,steer:(left?1:0)-(right?1:0),handbrake:keys.has('Space')};physics.step(dt);pedals.record(dt,physics.input.throttle,physics.telemetry.brakeApplied,physics.input.brake);updateLap(dt);
+        const throttle=Math.max(accel?1:0,controller.throttle),signed=physics.telemetry.signedSpeed;
+        const reverse=(brake||controller.reverse)&&signed<=1&&throttle<.01;
+        const brakeDemand=Math.max((brake||controller.reverse)&&signed>1?1:0,controller.brake);
+        const keyboardSteer=(left?1:0)-(right?1:0);
+        physics.input={throttle,brake:reverse?0:brakeDemand,reverse,steer:keyboardSteer||controller.steer,handbrake:keys.has('Space')||controller.handbrake};physics.step(dt);pedals.record(dt,physics.input.throttle,physics.telemetry.brakeApplied,physics.input.brake);updateLap(dt);
         if(!Number.isFinite(physics.body.position.y)||physics.body.position.y<physics.killY)resetKart();
       }
     }else if(!running){physics.input={throttle:0,brake:.4,steer:0,handbrake:false,reverse:false};physics.step(dt);}
@@ -285,5 +320,5 @@ try{game=new GameScene($('#scene-container'),physics);physics.setTrack(currentTr
 catch(error){$('#loading-screen').remove();$('#error-overlay').hidden=false;$('#error-message').textContent=`请使用支持 WebGL 2 的浏览器并开启硬件加速。${(error as Error).message}`;}
 
 // Read-only state for reproducible browser QA and integrations.
-Object.defineProperty(window,'apex',{get:()=>({track:currentTrack,physics,editor,game,running,paused,countingDown,lapTime,lapNumber,checkpoint,dirty,terrainPainter,pedals,timing,audio,reference})});
+Object.defineProperty(window,'apex',{get:()=>({track:currentTrack,physics,editor,game,running,paused,countingDown,lapTime,lapNumber,checkpoint,dirty,terrainPainter,pedals,timing,audio,reference,controller})});
 
