@@ -1,4 +1,48 @@
 /* Broadcast timing UI: charcoal cells, white type, yellow identity and live sector colours. */
+#circuit-scale.circuit-scale-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #45443d;
+  background: #1b1c1a;
+}
+
+#circuit-scale .circuit-scale-tab {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-right: 1px solid #45443d;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: #242522;
+  color: #c5c6be;
+  font: inherit;
+  font-size: clamp(10px, 2.5vw, 13px);
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+#circuit-scale .circuit-scale-tab:last-child { border-right: 0; }
+#circuit-scale .circuit-scale-tab[aria-selected="true"] {
+  border-bottom-color: #f0d66f;
+  background: #343126;
+  color: #f0d66f;
+}
+#circuit-scale .circuit-scale-tab:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #f0d66f;
+  outline-offset: -3px;
+}
+
 :root{--lime:#d6c16d;--muted:#899393;--line:#303a3b;--panel:#101617;--mono:'Bahnschrift','DIN Alternate','Barlow Condensed',monospace;color:#e7edeb;background:#030708;font-family:'Bahnschrift','Noto Sans SC',sans-serif}
 button,input,select,a,dialog,.session-card,.canvas-wrap,.library-block,.analysis-grid,.preset,.panel-footer,.lap-history,.pedal-panel,.toast{border-radius:0!important}
 .topbar{background:#060b0c;border-color:#293335}.brand-mark svg{fill:var(--lime)}.wordmark{color:#f1f3ed}.brand-sub{color:#abb7b7}.brand-separator{color:#4e6466}.main-nav .active{color:#f2f4ed}.nav-button{color:#99a6a6}.new-tag{color:#d6c16d;background:#28291e}.icon-button{color:#c4cecd}.icon-button:hover{background:#263032;color:#fff}.save-button{border-color:#72705a;color:#e5dbad}.save-button:hover{background:#2b2c25;border-color:var(--lime)}
@@ -12,5 +56,6 @@ button,input,select,a,dialog,.session-card,.canvas-wrap,.library-block,.analysis
 @media(max-width:1200px){.sector-bars{width:calc(100% - 40px)}.sector-value small,.timing-total>strong{font-size:27px}.timing-driver strong{font-size:23px}.hero-copy{left:25px}.hero-copy h1{font-size:26px}}
 @media(max-width:700px){.hero-copy{left:20px;top:76px;padding:12px 15px}.hero-copy h1{font-size:22px;letter-spacing:1px}.hero-copy p{font-size:9px}.viewport-top{left:20px;right:20px}.live-badge,.weather{padding:6px 7px}.kart-spec{padding:8px 10px;bottom:205px}.sector-bars{bottom:48px;width:calc(100% - 24px);gap:3px;grid-template-columns:58px repeat(3,minmax(0,1fr)) 82px}.timing-driver>b,.sector-bar>b,.timing-total>b{height:21px;font-size:8px;letter-spacing:.4px}.timing-driver>div,.sector-value,.timing-total>strong{height:33px}.timing-driver>div{grid-template-columns:18px 1fr;gap:2px}.timing-driver>div>span{font-size:12px}.timing-driver strong{font-size:13px;letter-spacing:.3px}.sector-value{border-left-width:2px}.sector-value small{font-size:16px;letter-spacing:0}.timing-total>strong{font-size:17px;letter-spacing:0}.driving-hud{bottom:225px}.speedometer{bottom:-80px}.pedal-panel{left:15px;bottom:263px;width:180px}.pedal-heading{font-size:8px}.mobile-controls{bottom:116px}.lap-clock>strong{font-size:34px}.lap-clock>div{font-size:8px}.lap-history{padding:6px 8px}.lap-history li{padding:3px}.lap-history b{font-size:12px}.is-driving .g-meter{display:none}.cockpit-view .speedometer{bottom:130px}}
 @media(prefers-reduced-motion:reduce){.sector-value i{transition:none}}
+.library-load-row #circuit-scale{width:100%}.panel-footer #auto-status{font-size:10px;color:#a6bbb4;padding:5px 0;margin:0}
 .viewport-top{justify-content:flex-end}.error-overlay{bottom:0}
 .pedal-assist-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0 2px;font:9px var(--mono);color:#a4b4b2}.brake-demand-key{display:flex;align-items:center;gap:5px;white-space:nowrap}.brake-demand-key:before{content:'';width:12px;border-top:1px dashed #cad2cd}.brake-demand-key small{color:#7f9495;font-size:8px}.pedal-assist-row #abs-status{font-weight:500;white-space:nowrap;font-size:9px;color:#78938c;border:1px solid #3d534b;padding:2px 4px}.pedal-assist-row #abs-status.active{color:#141a16;background:#e5c06b;border-color:#e5c06b}.pedal-heading>div{white-space:nowrap}#vehicle-source{font-size:9px;color:#b8c8c1}@media(max-width:700px){.brake-demand-key small{display:none}.pedal-assist-row{gap:4px;font-size:8px}.pedal-assist-row #abs-status{font-size:8px;padding:1px 3px}}

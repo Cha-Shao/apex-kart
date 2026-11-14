@@ -3,3 +3,4 @@ dist/
 .sites-local/
 *.log
 test-results/
+src/circuit-data/dem-cache/

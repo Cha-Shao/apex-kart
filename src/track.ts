@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { parseTerrain, type TerrainData } from './terrain';
 import {trackFeatures,type TrackFeatures} from './track-features';
+import {drapeTriangles,type TerrainGrid} from './terrain-mesh';
 
 export interface Point { x: number; z: number }
 export type SegmentKind = 'straight' | 'curve' | 'hairpin';
@@ -103,7 +104,16 @@ export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number,knownNe
   const triangle=(a:Point,b:Point,c:Point)=>{const cross=(u:Point,v:Point)=>(v.x-u.x)*(p.z-u.z)-(v.z-u.z)*(p.x-u.x),area=(b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x);if(Math.abs(area)<1e-7)return false;const x=cross(a,b),y=cross(b,c),z=cross(c,a);return x>=-1e-6&&y>=-1e-6&&z>=-1e-6||x<=1e-6&&y<=1e-6&&z<=1e-6;};
   for(const r of track.runoffRegions){if(p.x<r.minX||p.x>r.maxX||p.z<r.minZ||p.z>r.maxZ)continue;const [a,b,c,d]=r.points;if(triangle(a,b,c)||triangle(b,d,c))return true;}return false;
 }
-export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>number){const vertices:number[]=[],indices:number[]=[];for(const r of track.runoffRegions){const base=vertices.length/3;r.points.forEach((p,j)=>vertices.push(p.x,surface(p.x,p.z)+bridgeHeight(track,(r.index+(j>=2?1:0))%track.samples.length)+.008,p.z));if(r.side>0)indices.push(base,base+1,base+2,base+1,base+3,base+2);else indices.push(base,base+2,base+1,base+1,base+2,base+3);}return {vertices,indices};}
+export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid:TerrainGrid){
+  const vertices:number[]=[],indices:number[]=[];
+  for(const r of track.runoffRegions){
+    const [a,b,c,d]=r.points,start=track.samples[r.index],end=track.samples[(r.index+1)%track.samples.length],dx=end.x-start.x,dz=end.z-start.z,length2=dx*dx+dz*dz;
+    const h0=bridgeHeight(track,r.index),h1=bridgeHeight(track,(r.index+1)%track.samples.length);
+    const data=drapeTriangles([[a,b,c],[b,d,c]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-start.x)*dx+(z-start.z)*dz)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+.012;},grid),base=vertices.length/3;
+    for(const v of data.vertices)vertices.push(v);for(const i of data.indices)indices.push(base+i);
+  }
+  return {vertices,indices};
+}
 
 export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 

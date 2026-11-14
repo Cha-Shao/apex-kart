@@ -24,7 +24,7 @@
 
 ## 戴托纳国际赛车场
 
-提供24小时道路赛（约5.73 km）与三椭圆（约4.023 km）两条平面线形近似。道路赛含国际马蹄弯、西马蹄弯和Le Mans减速弯。没有真实倾角或实测高程。
+提供24小时道路赛（约5.73 km）与三椭圆（约4.023 km）两条平面线形近似。道路赛含国际马蹄弯、西马蹄弯和Le Mans减速弯。现已加入 DEM 近似地形；未包含真实赛道横向倾角或实测路面高程。
 
 几何来源：© OpenStreetMap contributors / OpenTrackData（ODbL 1.0）。
 https://github.com/chendo/opentrackdata/blob/main/data/tracks/daytona.geojson
@@ -35,4 +35,9 @@ https://github.com/chendo/opentrackdata/blob/main/data/tracks/daytona.geojson
 官方道路赛长度：https://www.imsa.com/daytona-international-speedway
 
 仅本地使用与交付，不再向ChatGPT Site发布更新。
+<h2>预设高程 · 2026-11-15</h2>
+<p>27 条真实赛道使用 <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen Terrain Tiles</a> 的 Terrarium z12 数据，按各线路原始地理投影取样，离线保存在 /data/elevation/。高程解码遵循 <a href="https://github.com/tilezen/joerd/blob/master/docs/formats.md">官方 Terrarium 格式说明</a>。运行时只读取本地文件，无外部高程请求。</p>
+<p>处理：双线性重采样到 129×129 地形，两次局部平滑；减去起点附近高程作为相对零点，地形边界渐回零。原尺寸保留相对米制高程；缩放版高度与水平坐标同比缩放。可视地形、轮胎碰撞和笔刷共用同一高度场。格网尺度与地理位置相关，不能表示精确的路面细节、路肩、横向倾角或隧道；DEM 也可能带有城市建筑、旧地形和采样误差。铃鹿交叉处沿用游戏生成式立交，不是 DEM 识别桥梁。</p>
+<p>数据署名：Mapzen / Tilezen；USGS 的 SRTM、GMTED2010、3DEP；澳大利亚 Geoscience Australia（2017）；奥地利 offene Daten Österreichs；加拿大 Open Government Licence – Canada；欧盟 Copernicus EU-DEM；墨西哥 INEGI（2016）；英国 Environment Agency（2015）。各地区源数据的许可与署名要求见 <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">数据提供方说明</a>。访问日期：2026-11-15。</p>
+<p>海岸俱乐部、流线公园、发夹挑战为虚构赛道，新增高程为程序设计地形，不是实测。已保存或导入的自定义高度保持优先；重新选择预设可载入新地形。</p>
 </body>

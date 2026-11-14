@@ -14,6 +14,8 @@ export class KartPhysics {
   barriers:CANNON.Body[]=[];
   terrain=new TerrainField();
   terrainBody:CANNON.Body|null=null;
+  private safetyGround!:CANNON.Body;
+  killY=-90;
   roadBody:CANNON.Body|null=null;
   curbBody:CANNON.Body|null=null;
   telemetry:Telemetry={speed:0,signedSpeed:0,rpm:1600,steering:0,grip:1,offroad:false,lateralG:0,longitudinalG:0,grounded:0,fourWheelsOutside:false,brakeApplied:0,absActive:false,downforce:0,kerbLeft:0,kerbRight:0};
@@ -41,7 +43,7 @@ export class KartPhysics {
     this.world.defaultContactMaterial.restitution=.08;
     const groundMaterial=new CANNON.Material('ground');const chassisMaterial=new CANNON.Material('kart');
     this.world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:.25,restitution:.1,contactEquationStiffness:1e7}));
-    const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);
+    const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);this.safetyGround=ground;
     this.body=new CANNON.Body({mass:165,material:chassisMaterial,linearDamping:.025,angularDamping:.4});
     this.body.allowSleep=false;
     this.vehicle=new AssistedVehicle({chassisBody:this.body,indexRightAxis:0,indexUpAxis:1,indexForwardAxis:2});
@@ -68,6 +70,7 @@ export class KartPhysics {
     if(this.terrainBody)this.world.removeBody(this.terrainBody);if(this.roadBody)this.world.removeBody(this.roadBody);this.roadBody=null;
     if(this.curbBody)this.world.removeBody(this.curbBody);this.curbBody=null;
     this.terrain=terrain.clone();const f=this.terrain,n=f.resolution;
+    const minimum=f.min;this.killY=minimum-40;this.safetyGround.position.y=minimum-50;this.safetyGround.updateAABB();
     const data=Array.from({length:n},(_,x)=>Array.from({length:n},(_,j)=>f.heights[(n-1-j)*n+x]));
     const heightfield=new CANNON.Heightfield(data,{elementSize:f.cellSize});
     this.terrainBody=new CANNON.Body({mass:0,shape:heightfield,position:new CANNON.Vec3(f.originX,0,f.originZ+f.size)});this.terrainBody.quaternion.setFromEuler(-Math.PI/2,0,0);this.terrainBody.updateAABB();this.world.addBody(this.terrainBody);

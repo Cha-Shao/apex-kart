@@ -49,7 +49,7 @@ export class TrackEditor {
   private pointerMove(e:PointerEvent){
     if(!this.down)return;const p=this.toWorld(e);
     if(this.tool==='draw'){if(distance(p,this.raw.at(-1)!)>1)this.raw.push(p);this.draw();}
-    else if(this.dragging>=0){this.points[this.dragging]=p;try{this.track=buildTrack(this.points,this.settings,this.options);}catch{this.track=null;}this.draw();}
+    else if(this.dragging>=0){if(distance(this.points[this.dragging],p)<.01)return;this.points[this.dragging]=p;try{this.track=buildTrack(this.points,this.settings,this.options);}catch{this.track=null;}this.draw();this.onChange(this.points,this.track);}
   }
   private pointerUp(e:PointerEvent){
     if(!this.down)return;this.down=false;

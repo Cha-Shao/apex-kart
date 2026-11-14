@@ -37,6 +37,7 @@ export class GameScene {
   private skidMarks:THREE.Mesh;
   private previousSkid:({center:THREE.Vector3;left:THREE.Vector3;right:THREE.Vector3}|null)[]=[null,null];
   private time=0;
+  private floor:THREE.Mesh;
   onContextLost=()=>{};
   constructor(public container:HTMLElement,physics:KartPhysics){
     this.physics=physics;
@@ -51,7 +52,7 @@ export class GameScene {
     this.scene.background=new THREE.Color(0xc6d2c7);this.scene.fog=new THREE.Fog(0xc6d2c7,400,950);
     const hemi=new THREE.HemisphereLight(0xebf5f2,0x6d8065,2.4);this.scene.add(hemi);
     const sun=new THREE.DirectionalLight(0xfff3d4,3.3);sun.position.set(-100,180,80);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-225,right:225,top:200,bottom:-200,near:1,far:500});sun.shadow.normalBias=.035;sun.shadow.bias=-.0004;this.scene.add(sun);this.scene.add(sun.target);
-    const grass=material(0x9aac8d);const floor=new THREE.Mesh(new THREE.PlaneGeometry(200000,200000),grass);floor.rotation.x=-Math.PI/2;floor.position.y=-70.055;floor.receiveShadow=true;this.scene.add(floor);
+    const grass=material(0x9aac8d);const floor=new THREE.Mesh(new THREE.PlaneGeometry(200000,200000),grass);floor.rotation.x=-Math.PI/2;floor.position.y=-70.055;floor.receiveShadow=true;this.scene.add(floor);this.floor=floor;
     this.scene.add(this.landscape,this.circuit,this.scenery,this.kart.root,...this.kart.wheelMeshes);
     const skidGeometry=new THREE.BufferGeometry();skidGeometry.setAttribute('position',new THREE.BufferAttribute(this.skidPositions,3).setUsage(THREE.DynamicDrawUsage));skidGeometry.setDrawRange(0,0);
     this.skidMarks=new THREE.Mesh(skidGeometry,new THREE.MeshBasicMaterial({color:0x101512,transparent:true,opacity:.65,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));this.skidMarks.frustumCulled=false;this.scene.add(this.skidMarks);
@@ -84,10 +85,11 @@ export class GameScene {
   private sign(text:string,w:number,h:number,bg='#1c3031',fg='#d1ef70'){
     const c=document.createElement('canvas');c.width=1024;c.height=192;const ctx=c.getContext('2d')!;ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='italic 900 116px Arial';ctx.fillText(text,c.width/2,c.height*.53);const map=new THREE.CanvasTexture(c);map.colorSpace=THREE.SRGBColorSpace;return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map}));
   }
-  setTrack(track:TrackData,settings:TrackSettings,terrain:TerrainField=new TerrainField()){
+  setTrack(track:TrackData,settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
     this.track=track;this.terrain=terrain.clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);
+    this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
-    const runoff=runoffGeometry(track,(x,z)=>this.terrain.sample(x,z)),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();const runoffMat=material(0x59615b);runoffMat.polygonOffset=true;runoffMat.polygonOffsetFactor=-.8;runoffMat.polygonOffsetUnits=-.8;const apron=new THREE.Mesh(runoffGeo,runoffMat);apron.receiveShadow=true;this.circuit.add(apron);
+    const runoff=runoffGeometry(track,(x,z)=>this.terrain.sample(x,z),this.terrain),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();const runoffMat=material(0x59615b);runoffMat.polygonOffset=true;runoffMat.polygonOffsetFactor=-.8;runoffMat.polygonOffsetUnits=-.8;const apron=new THREE.Mesh(runoffGeo,runoffMat);apron.receiveShadow=true;this.circuit.add(apron);
     this.ribbon(track,0,track.width,.018,0x414b4b);
     for(const side of [-1,1]){
       this.ribbon(track,side*(half-.24),.13,.026,0xe5e8d7);
@@ -111,7 +113,7 @@ export class GameScene {
     const back=this.sign('APEX  /  KART CLUB',track.width+2.9,.83);back.position.set(0,5.48,-.25);back.rotation.y=Math.PI;grid.add(back);
     for(let i=0;i<5;i++){const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,8,8),new THREE.MeshStandardMaterial({color:0xc5ef4e,emissive:0x486612,emissiveIntensity:.5}));lamp.position.set((i-2)*.44,4.68,0);grid.add(lamp);}
     for(const bridge of track.bridges){const s=track.samples[bridge.index],height=bridge.height;for(const side of [-1,1]){const x=s.x+s.nx*(half+.4)*side,z=s.z+s.nz*(half+.4)*side;this.box(this.circuit,x,this.terrain.sample(x,z)+height/2,z,.35,height,.35,0x73877c);}}
-    this.addScenery();this.addBrakeBoards();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;this.frameTrack();
+    this.addScenery();this.addBrakeBoards();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;if(reframe)this.frameTrack();
   }
   private addBrakeBoards(){
     const track=this.track,n=track.samples.length,step=track.length/n,placed:THREE.Vector3[]=[];

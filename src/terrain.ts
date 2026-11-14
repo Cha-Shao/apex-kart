@@ -30,6 +30,7 @@ export class TerrainField {
   }
   paint(p:Point,radius:number,strength:number,dt:number,mode:BrushMode){
     const n=this.resolution,step=this.cellSize,old=mode==='smooth'?this.heights.slice():this.heights;
+    let changed=false;
     const ix=Math.round((p.x-this.originX)/step),iz=Math.round((p.z-this.originZ)/step),r=Math.ceil(radius/step);
     for(let z=Math.max(1,iz-r);z<=Math.min(n-2,iz+r);z++)for(let x=Math.max(1,ix-r);x<=Math.min(n-2,ix+r);x++){
       const dist=Math.hypot(this.originX+x*step-p.x,this.originZ+z*step-p.z)/radius;if(dist>=1)continue;
@@ -37,15 +38,16 @@ export class TerrainField {
       let next=h;
       if(mode==='raise'||mode==='lower')next=h+(mode==='raise'?1:-1)*strength*dt*feather;
       else{const target=mode==='flatten'?0:(old[index-1]+old[index+1]+old[index-n]+old[index+n]+old[index]*4)/8;next=h+(target-h)*Math.min(1,strength*dt*.75)*feather;}
-      this.heights[index]=Math.max(-60,Math.min(100,next));
+      const value=Math.fround(Math.max(-1000,Math.min(1000,next)));
+      if(value!==h){this.heights[index]=value;changed=true;}
     }
-    this.revision++;
+    if(changed)this.revision++;
   }
   clear(){this.heights.fill(0);this.revision++;}
 }
 export function parseTerrain(data:unknown):TerrainField{
   const v=data as TerrainData;
-  if(!v||![65,129,257].includes(v.resolution)||!Number.isFinite(v.size)||v.size<100||v.size>50000||!Number.isFinite(v.originX)||!Number.isFinite(v.originZ)||Math.abs(v.originX)>25000||Math.abs(v.originZ)>25000||!Array.isArray(v.heights)||v.heights.length!==v.resolution**2||v.heights.some(h=>!Number.isFinite(h)||h<-60||h>100))throw new Error('高度图数据无效。');
+  if(!v||![65,129,257].includes(v.resolution)||!Number.isFinite(v.size)||v.size<100||v.size>50000||!Number.isFinite(v.originX)||!Number.isFinite(v.originZ)||Math.abs(v.originX)>25000||Math.abs(v.originZ)>25000||!Array.isArray(v.heights)||v.heights.length!==v.resolution**2||v.heights.some(h=>!Number.isFinite(h)||h<-1000||h>1000))throw new Error('高度图数据无效。');
   return new TerrainField(v);
 }
 
@@ -74,7 +76,7 @@ export class TerrainPainter {
   setField(field:TerrainField){this.field=field;this.history=[];this.radius=Math.max(24,field.size*.05);this.draw();}
   setActive(active:boolean){this.active=active;this.canvas.style.pointerEvents=active?'auto':'none';this.canvas.classList.toggle('painting',active);if(!active){this.down=false;this.pointer=null;}this.draw();}
   private updatePointer(e:PointerEvent){const r=this.canvas.getBoundingClientRect();this.pointer=this.unproject((e.clientX-r.left)/r.width*800,(e.clientY-r.top)/r.height*600);}
-  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;this.field.paint(this.pointer,this.radius,this.strength,dt,mode);this.draw();requestAnimationFrame(t=>this.paintFrame(t));}
+  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;const revision=this.field.revision;this.field.paint(this.pointer,this.radius,this.strength,dt,mode);if(this.field.revision!==revision){this.draw();this.onChange();}requestAnimationFrame(t=>this.paintFrame(t));}
   undo(){const h=this.history.pop();if(!h)return;this.field.heights.set(h);this.field.revision++;this.draw();this.onChange();}
   clear(){this.history.push(this.field.heights.slice());this.field.clear();this.draw();this.onChange();}
   draw(){

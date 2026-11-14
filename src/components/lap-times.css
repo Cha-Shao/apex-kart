@@ -1,4 +1,8 @@
 /* One aligned grid, with status badges outside the card's right edge. */
+.lap-result-row.lap-result-row--invalid { opacity: .48; }
+.lap-times-current.lap-times-current--invalid { opacity: .48; }
+.lap-result-row .lap-result-time { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 2px 0; line-height: 1; }
+.lap-result-time .lap-result-absolute { display:block; font-size: 9px; line-height: 1; font-weight: 400; opacity: .72; white-space: nowrap; }
 #lap-history.lap-history{left:30px;top:88px;width:340px;min-width:0;max-width:calc(100% - 92px);padding:0;border:0;background:transparent;overflow:visible;backdrop-filter:none}
 .lap-times-card{position:relative;width:100%;padding:0;background:#172323eF;color:#f0f4ef;overflow:visible;font-variant-numeric:tabular-nums}
 .lap-times-current{position:relative;padding:18px 0 15px;display:flex;align-items:center;justify-content:center;min-height:85px;border-bottom:1px solid #778f8c44}
