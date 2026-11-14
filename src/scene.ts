@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {Vec3} from 'cannon-es';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeKart } from './kart';
 import { makeRB20 } from './rb20';
@@ -23,6 +24,10 @@ export class GameScene {
   mode:CameraMode='orbit';
   tyreSquealLeft=0;
   tyreSquealRight=0;
+  private slipDuration=[0,0];
+  private slipAxle=new Vec3();
+  private slipVelocity=new Vec3();
+  private slipGroundVelocity=new Vec3();
   private target=new THREE.Vector3();
   private desired=new THREE.Vector3();
   private resizeObserver:ResizeObserver;
@@ -194,10 +199,26 @@ export class GameScene {
       for(let j=0;j<2;j++){
         const w=this.physics.vehicle.wheelInfos[j+2];
         const handbrake=this.physics.profile.id==='kart'&&this.physics.input.handbrake;
-        if(w.isInContact&&(handbrake||w.skidInfo<.7)&&!this.physics.telemetry.offroad){
-          // Share the exact mark trigger; sound follows current sliding, not
-          // old rubber already on the road. No extra track/contact queries.
-          const intensity=handbrake?.85:.18+.82*Math.max(0,Math.min(1,(.7-w.skidInfo)/.7));
+        let lateralSlip=0,rollingSpeed=0;
+        if(w.isInContact){
+          const point=w.raycastResult.hitPointWorld,normal=w.raycastResult.hitNormalWorld;
+          w.worldTransform.quaternion.vmult(Vec3.UNIT_X,this.slipAxle);
+          const projection=this.slipAxle.dot(normal);
+          this.slipAxle.x-=normal.x*projection;this.slipAxle.y-=normal.y*projection;this.slipAxle.z-=normal.z*projection;this.slipAxle.normalize();
+          this.physics.body.getVelocityAtWorldPoint(point,this.slipVelocity);
+          this.slipGroundVelocity.setZero();w.raycastResult.body?.getVelocityAtWorldPoint(point,this.slipGroundVelocity);
+          this.slipVelocity.vsub(this.slipGroundVelocity,this.slipVelocity);
+          lateralSlip=Math.abs(this.slipVelocity.dot(this.slipAxle));
+          rollingSpeed=Math.sqrt(Math.max(0,this.slipVelocity.lengthSquared()-lateralSlip*lateralSlip));
+        }
+        // skidInfo reports friction saturation, not measured wheel slip. Require
+        // actual lateral sliding too, with hysteresis and a brief onset delay.
+        const continuing=this.slipDuration[j]>=.07;
+        const sliding=w.skidInfo<(continuing?.75:.6)&&lateralSlip>Math.max(continuing?.45:.85,rollingSpeed*(continuing?.035:.055));
+        const valid=w.isInContact&&!this.physics.telemetry.offroad;
+        this.slipDuration[j]=valid&&sliding?Math.min(.2,this.slipDuration[j]+dt):0;
+        if(valid&&(handbrake||this.slipDuration[j]>=.07)){
+          const intensity=handbrake?.85:Math.min(1,Math.max(0,(lateralSlip-.4)/3.5));
           if(j===0)this.tyreSquealLeft=intensity;else this.tyreSquealRight=intensity;
           const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
           if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
@@ -212,7 +233,7 @@ export class GameScene {
         }else this.previousSkid[j]=null;
       }
       if(changed){this.skidMarks.geometry.getAttribute('position').needsUpdate=true;this.skidMarks.geometry.setDrawRange(0,this.skidCount*6);}
-    }else this.previousSkid=[null,null];
+    }else{this.previousSkid=[null,null];this.slipDuration=[0,0];}
     if(running||this.time<2)this.renderer.shadowMap.needsUpdate=true;
     this.renderer.render(this.scene,this.camera);
   }
