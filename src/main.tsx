@@ -1,5 +1,6 @@
 import './style.css';
 import './broadcast.css';
+import './start-signal.css';
 import './gamepad.css';
 import './editor-cards.css';
 import {GamepadController} from './gamepad';
@@ -11,10 +12,11 @@ import {mountLapTimes} from './components/LapTimes';
 import {mountVehiclePicker} from './components/VehiclePicker';
 import {type VehicleId} from './vehicles';
 import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
-import { buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
+import { bridgeHeight, buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
 import { TrackEditor } from './editor';
 import { KartPhysics } from './physics';
 import { GameScene, type CameraMode } from './scene';
+import {START_LIGHT_COUNT,StartSequence} from './start-signal';
 import { EngineAudio } from './audio';
 import { TerrainField, TerrainPainter, parseTerrain, type BrushMode } from './terrain';
 import { PedalHistory } from './telemetry';
@@ -41,6 +43,7 @@ $('#app').innerHTML=`
     <div class="viewport-top"><div class="weather"><i data-lucide="sun"></i><span>晴 · 24°C</span><span class="weather-line"></span><span>干燥路面</span></div></div>
     <div class="session-top" id="session-top" hidden><div class="session-chip"><span class="live-dot"></span>自由练习<span class="session-divider">/</span><span id="race-track-name">${defaultCircuit.name}</span></div></div>
     <div class="lap-history" id="lap-history" hidden></div><div class="sector-bars" id="sector-bars" hidden><div class="timing-driver"><b>DRIVER</b><div><span>07</span><strong>YOU</strong></div></div><div class="sector-bar pending" data-sector="0"><b>SECTOR 1</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="sector-bar pending" data-sector="1"><b>SECTOR 2</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="sector-bar pending" data-sector="2"><b>SECTOR 3</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="timing-total"><b>LAP TIME</b><strong id="broadcast-lap">0:00.000</strong></div></div><div class="center-message" id="center-message" hidden></div>
+    <div class="start-signal" id="start-signal" role="status" aria-live="polite" aria-atomic="true" hidden><div class="start-signal__rail" aria-hidden="true">${Array.from({length:START_LIGHT_COUNT},()=>'<span class="start-signal__lamp"></span>').join('')}</div><span id="start-signal-label" class="start-signal__label">等待红灯 · 熄灭起步</span></div>
     <div class="session-card" id="session-card"><div class="session-number">01<span>/ CIRCUIT</span></div><div class="session-info"><div class="session-title-row"><h2 id="track-name">${defaultCircuit.name}</h2><span class="difficulty-dot"></span><span class="difficulty-label" id="difficulty-label">技术型</span></div><p><span id="track-length-label">— m</span><span>·</span><span id="track-corners-label">— 个弯道</span><span>·</span><span>单人计时</span></p></div><button class="drive-button" id="start-button"><span>上车试驾</span><i data-lucide="arrow-up-right"></i></button></div>
     <div class="kart-spec" id="kart-spec"><span class="spec-label" id="vehicle-size">YOUR KART · 1.35 × 1.80 m</span><div class="kart-title"><strong id="vehicle-name">APX–07</strong> <span id="vehicle-engine">4-STROKE</span></div><div class="kart-details"><span id="vehicle-weight">165 <small>kg</small></span><span id="vehicle-capacity">200 <small>cc</small></span><div class="color-options" aria-label="车身颜色"><button class="color-swatch selected" data-color="#c4ed4c" style="--swatch:#c4ed4c" aria-label="青柠色车身"></button><button class="color-swatch" data-color="#e88161" style="--swatch:#e88161" aria-label="珊瑚色车身"></button><button class="color-swatch" data-color="#75c9cc" style="--swatch:#75c9cc" aria-label="冰蓝色车身"></button></div><a id="vehicle-source" href="/vehicle-credits.html" target="_blank" rel="noopener" hidden>公开规格 ↗</a></div></div>
     <div class="driving-hud" id="driving-hud" hidden><div class="g-meter"><span>轮胎抓地</span><div class="g-circle"><div class="g-horizontal"></div><div class="g-vertical"></div><b id="g-dot"></b></div><span id="grip-label">正常抓地</span></div><div class="speedometer"><div class="rpm-bars" id="rpm-bars">${Array.from({length:22},(_,i)=>`<span style="--bar:${i}"></span>`).join('')}</div><div class="speed-value"><strong id="speed">0</strong><div><b id="gear">N</b><span>KM/H</span></div></div><div class="speed-meta"><span><span class="status-dot"></span><span id="surface-label">干燥沥青</span></span><span id="rpm-label">1,600 RPM</span></div></div></div>
@@ -121,8 +124,10 @@ const timing=new SectorTiming();
 const lapCard=mountLapTimes($('#lap-history'));
 function renderLapCard(){lapCard.update({currentTime:timing.time,currentLap:timing.lap,currentInvalid:timing.invalid,history:timing.history.slice()});}
 let soundTouched=false;
-let running=false,paused=false,countingDown=false,countdown=0,goDisplay=0,lapTime=0,lapNumber=1,bestTime=Infinity,checkpoint=0,lapStarted=false;
-let lastProgress=0,lastTime=performance.now(),hudElapsed=0,fpsAccum=0,fpsFrames=0;
+const startSequence=new StartSequence(),startSignal=$('#start-signal'),startLamps=[...document.querySelectorAll<HTMLElement>('.start-signal__lamp')];
+let running=false,paused=false,lightsOutDisplay=0,displayedStartLights=-1,lapTime=0,lapNumber=1,bestTime=Infinity,checkpoint=0,lapStarted=false;
+const previousLapPosition={x:0,y:0,z:0};
+let lastTime=performance.now(),hudElapsed=0,fpsAccum=0,fpsFrames=0;
 const keys=new Set<string>(),touchKeys=new Set<string>();
 const controller=new GamepadController();
 let previousPadStatus='waiting';
@@ -176,31 +181,46 @@ function applyDraft(automatic=false){
   updateTrackLabels();setStatus('已实时更新，可以直接试驾。');
 }
 function bestKey(){let h=2166136261;for(const c of JSON.stringify({points:appliedPoints,settings:appliedSettings,terrain:appliedTerrain.toJSON()})){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return `apex-best-valid-v2-${(h>>>0).toString(16)}${physics.profile.id==='kart'?'':'-rb20'}`;}
+function renderSectorTiming(progress=0){
+ document.querySelectorAll<HTMLElement>('[data-sector]').forEach((bar,i)=>{bar.className='sector-bar '+(!lapStarted?'pending':i<timing.sector?timing.colors[i]:i===timing.sector?'active':'pending');bar.querySelector<HTMLElement>('i')!.style.width=(lapStarted?Math.max(0,Math.min(1,progress*3-i))*100:0)+'%';bar.querySelector('small')!.textContent=(timing.splits[i]??(i===timing.sector?timing.time-timing.start:0)).toFixed(3).padStart(6,'0');});
+}
+function waitForStartLine(){lapStarted=false;Object.assign(previousLapPosition,physics.body.position);renderSectorTiming();}
+function renderStartSignal(){
+  const lit=startSequence.litCount;
+  startSignal.hidden=paused;
+  if(lit===displayedStartLights)return;
+  displayedStartLights=lit;game?.setStartLights(lit);
+  startLamps.forEach((lamp,i)=>lamp.classList.toggle('is-lit',i<lit));
+  $('#start-signal-label').textContent=startSequence.active?'等待红灯 · 熄灭起步':'红灯熄灭 · 起步';
+  startSignal.setAttribute('aria-label',startSequence.active?`已亮起 ${lit} 盏红灯，等待全部熄灭后起步。`:'红灯已全部熄灭，可以起步。');
+}
 function startDrive(){
   if(loadingElevation){toast('正在载入赛道高度，请稍候。');return;}
   if(!game)return;if(dirty&&draftTrack)applyDraft();
   if(!currentTrack)return;
   pedals.reset();timing.reset();renderLapCard();if(!soundTouched){soundTouched=true;void audio.setEnabled(true).then(updateSoundButton).catch(()=>toast('点击顶栏声音按钮启用引擎音效。'));}
-  physics.reset();controller.suspend();keys.clear();touchKeys.clear();running=true;paused=false;countingDown=true;countdown=3;goDisplay=0;physics.setStaged(true);lapTime=0;lapNumber=1;checkpoint=0;lapStarted=false;lastProgress=0;
+  physics.reset();controller.suspend();keys.clear();touchKeys.clear();running=true;paused=false;startSequence.start();lightsOutDisplay=0;displayedStartLights=-1;physics.setStaged(true);lapTime=0;lapNumber=1;checkpoint=0;waitForStartLine();
   bestTime=Number(safeStorage.get(bestKey()))||Infinity;
   document.body.classList.add('is-driving');setEditorVisible(false);setCamera('cockpit');
   for(const id of ['session-top','driving-hud','race-actions','mobile-controls','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=false;
   for(const id of ['session-card','kart-spec'])$(`#${id}`).hidden=true;
+  $('#center-message').hidden=true;renderStartSignal();
   $('#controls-hint').innerHTML=`<span><kbd>W A S D</kbd> 驾驶</span><span>${physics.profile.id==='rb20'?'8-SPEED AUTO':'<kbd>Space</kbd> 手刹'}</span><span><kbd>R</kbd> 复位</span><span class="hint-extra"><kbd>C</kbd> 视角 <kbd>Esc</kbd> 暂停</span>`;
   $('#render-status').textContent='物理模拟运行中';$('#pause-button').innerHTML='<i data-lucide="pause"></i>';icons();
 }
 function exitDrive(){
-  controller.suspend();running=false;paused=false;countingDown=false;physics.setStaged(false);keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
+  controller.suspend();running=false;paused=false;startSequence.clear();lightsOutDisplay=0;displayedStartLights=-1;game?.setStartLights(0);physics.setStaged(false);keys.clear();touchKeys.clear();physics.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
   document.body.classList.remove('is-driving');setEditorVisible(true);setCamera('orbit');
-  for(const id of ['session-top','driving-hud','race-actions','mobile-controls','center-message','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=true;
+  for(const id of ['session-top','driving-hud','race-actions','mobile-controls','center-message','start-signal','pedal-panel','sector-bars','lap-history'])$(`#${id}`).hidden=true;
   for(const id of ['session-card','kart-spec'])$(`#${id}`).hidden=false;
   $('#controls-hint').innerHTML='<span><kbd>拖动</kbd> 旋转视角</span><span><kbd>滚轮</kbd> 缩放</span><span class="hint-extra">探索你的赛道</span>';$('#render-status').textContent='3D 实时预览';
 }
-function pause(){if(!running)return;controller.suspend();paused=!paused;keys.clear();touchKeys.clear();$('#center-message').hidden=!paused;$('#center-message').innerHTML=paused?'<span class="pause-title">休息一拍。</span><small>按 Esc 或点击暂停键继续</small>':'';$('#pause-button').innerHTML=`<i data-lucide="${paused?'play':'pause'}"></i>`;$('#pause-button').setAttribute('aria-label',paused?'继续':'暂停');icons();}
+function pause(){if(!running)return;controller.suspend();paused=!paused;keys.clear();touchKeys.clear();startSignal.hidden=paused||(!startSequence.active&&lightsOutDisplay<=0);$('#center-message').hidden=!paused;$('#center-message').innerHTML=paused?'<span class="pause-title">休息一拍。</span><small>按 Esc 或点击暂停键继续</small>':'';$('#pause-button').innerHTML=`<i data-lucide="${paused?'play':'pause'}"></i>`;$('#pause-button').setAttribute('aria-label',paused?'继续':'暂停');icons();}
 function resetKart(){
-  if(!running)return;controller.suspend();physics.reset(0);if(countingDown)physics.setStaged(true);
-  keys.clear();touchKeys.clear();pedals.reset();timing.restartLap();lapTime=0;lapStarted=false;checkpoint=0;lastProgress=0;
-  game?.setCamera(game.mode);renderLapCard();updateHUD();toast('已回到起点，本圈重新计时。');
+  if(!running)return;controller.suspend();physics.reset();lightsOutDisplay=0;
+  if(startSequence.active){startSequence.start();physics.setStaged(true);displayedStartLights=-1;renderStartSignal();}else startSignal.hidden=true;
+  keys.clear();touchKeys.clear();pedals.reset();timing.restartLap();lapTime=0;checkpoint=0;waitForStartLine();
+  game?.setCamera(game.mode);renderLapCard();updateHUD();toast('已回到第一格，过起跑线后重新计时。');
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.addEventListener('click',()=>{editor.setTool(b.dataset.tool as any);document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('selected',x===b));setStatus(b.dataset.tool==='draw'?'按住鼠标或手指，一笔画出不交叉的环线。':'拖动圆点，路线会自动更新。');}));
@@ -291,10 +311,27 @@ window.addEventListener('keydown',e=>{
 document.querySelectorAll<HTMLButtonElement>('[data-control]').forEach(b=>{const release=()=>{touchKeys.delete(b.dataset.control!);b.classList.remove('pressed');};b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);touchKeys.add(b.dataset.control!);b.classList.add('pressed');});b.addEventListener('pointerup',release);b.addEventListener('pointercancel',release);b.addEventListener('lostpointercapture',release);});
 
 function updateLap(dt:number){
- const near=nearestOnTrack(currentTrack,physics.body.position),progress=near.index/currentTrack.samples.length;
- const complete=timing.update(dt,progress,near.distance<currentTrack.width/2+1,physics.telemetry.signedSpeed>1,physics.trackLimitsExceeded);lapTime=timing.time;lapNumber=timing.lap;
+ const position=physics.body.position,near=nearestOnTrack(currentTrack,position),progress=near.index/currentTrack.samples.length;
+ let timedDt=dt;
+ if(!lapStarted){
+   const start=currentTrack.samples[0],before=(previousLapPosition.x-start.x)*start.tx+(previousLapPosition.z-start.z)*start.tz,after=(position.x-start.x)*start.tx+(position.z-start.z)*start.tz;
+   timedDt=0;
+   // Cross the painted line in the driving direction, within the road width
+   // and on its elevation, rather than relying on the nearest sample changing.
+   if(before<0&&after>=0){
+     const fraction=-before/(after-before),x=previousLapPosition.x+(position.x-previousLapPosition.x)*fraction,z=previousLapPosition.z+(position.z-previousLapPosition.z)*fraction,y=previousLapPosition.y+(position.y-previousLapPosition.y)*fraction;
+     const lateral=(x-start.x)*start.nx+(z-start.z)*start.nz,height=physics.terrain.sample(x,z)+bridgeHeight(currentTrack,0)+physics.profile.rideHeight;
+     if(Math.abs(lateral)<=currentTrack.width/2&&Math.abs(y-height)<2){
+       lapStarted=true;timing.restartLap();timing.previousProgress=progress;physics.clearTrackLimits();
+       // Only the portion of this frame after crossing belongs to the lap.
+       timedDt=dt*(1-fraction);
+     }
+   }
+ }
+ Object.assign(previousLapPosition,position);
+ const complete=lapStarted&&timing.update(timedDt,progress,near.distance<currentTrack.width/2+1,physics.telemetry.signedSpeed>1,physics.trackLimitsExceeded);lapTime=timing.time;lapNumber=timing.lap;
  if(complete){physics.clearTrackLimits();const lap=timing.history[0];if(!lap.invalid&&lap.time<bestTime){bestTime=lap.time;safeStorage.set(bestKey(),String(bestTime));toast('新最佳圈速 '+formatTime(bestTime));}}
- document.querySelectorAll<HTMLElement>('[data-sector]').forEach((bar,i)=>{bar.className='sector-bar '+(i<timing.sector?timing.colors[i]:i===timing.sector?'active':'pending');bar.querySelector<HTMLElement>('i')!.style.width=Math.max(0,Math.min(1,progress*3-i))*100+'%';bar.querySelector('small')!.textContent=(timing.splits[i]??(i===timing.sector?timing.time-timing.start:0)).toFixed(3).padStart(6,'0');});
+ renderSectorTiming(progress);
 }
 function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=!physics.vehicle.absEnabled?'ABS 关闭':t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',physics.vehicle.absEnabled&&t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
 function cycleCamera(){const modes:CameraMode[]=['chase','top','cockpit','orbit'];setCamera(modes[(modes.indexOf(game?.mode||'chase')+1)%modes.length]);}
@@ -323,9 +360,9 @@ function animate(now:number){
   if(game){
     pollController();
     if(running&&!paused){
-      if(countingDown){countdown=Math.max(0,countdown-dt);if(countdown===0){countingDown=false;physics.setStaged(false);goDisplay=.8;}else{physics.step(dt);$('#center-message').hidden=false;$('#center-message').innerHTML=`<span class="countdown-number">${Math.ceil(countdown)}</span><small>找到节奏，瞄准弯心。</small>`;}}
-      if(!countingDown){
-        if(goDisplay>0){goDisplay-=dt;$('#center-message').hidden=false;$('#center-message').innerHTML='<span class="countdown-go">GO.</span>';}else $('#center-message').hidden=true;
+      if(startSequence.active){const released=startSequence.advance(dt);renderStartSignal();if(released){physics.setStaged(false);lightsOutDisplay=.65;}else physics.step(dt);}
+      if(!startSequence.active){
+        if(lightsOutDisplay>0)lightsOutDisplay=Math.max(0,lightsOutDisplay-dt);else startSignal.hidden=true;
         const accel=keys.has('KeyW')||keys.has('ArrowUp')||touchKeys.has('throttle'),brake=keys.has('KeyS')||keys.has('ArrowDown')||touchKeys.has('brake'),left=keys.has('KeyA')||keys.has('ArrowLeft')||touchKeys.has('left'),right=keys.has('KeyD')||keys.has('ArrowRight')||touchKeys.has('right');
         const throttle=Math.max(accel?1:0,controller.throttle),signed=physics.telemetry.signedSpeed;
         const reverse=(brake||controller.reverse)&&signed<=1&&throttle<.01;
@@ -335,7 +372,7 @@ function animate(now:number){
         if(!Number.isFinite(physics.body.position.y)||physics.body.position.y<physics.killY)resetKart();
       }
     }else if(!running){physics.input={throttle:0,brake:.4,steer:0,handbrake:false,reverse:false};physics.step(dt);}
-    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!countingDown,physics.telemetry.speed,physics.telemetry.kerbLeft,physics.telemetry.kerbRight,game.tyreSquealLeft,game.tyreSquealRight,physics.telemetry.grassLeft,physics.telemetry.grassRight);
+    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!startSequence.active,physics.telemetry.speed,physics.telemetry.kerbLeft,physics.telemetry.kerbRight,game.tyreSquealLeft,game.tyreSquealRight,physics.telemetry.grassLeft,physics.telemetry.grassRight);
     hudElapsed+=dt;if(hudElapsed>.05){if(running)updateHUD();hudElapsed=0;}
   }
   fpsAccum+=dt;fpsFrames++;if(fpsAccum>1){$('#fps').textContent=`${Math.round(fpsFrames/fpsAccum)} FPS`;fpsAccum=0;fpsFrames=0;}
@@ -352,5 +389,5 @@ async function initializeScene(){
 void initializeScene();
 
 // Read-only state for reproducible browser QA and integrations.
-Object.defineProperty(window,'apex',{get:()=>({track:currentTrack,physics,editor,game,running,paused,countingDown,lapTime,lapNumber,checkpoint,dirty,terrainPainter,pedals,timing,audio,reference,controller})});
+Object.defineProperty(window,'apex',{get:()=>({track:currentTrack,physics,editor,game,running,paused,countingDown:startSequence.active,lapStarted,lapTime,lapNumber,checkpoint,dirty,terrainPainter,pedals,timing,audio,reference,controller})});
 

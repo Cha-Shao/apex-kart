@@ -3,6 +3,7 @@ import { bridgeHeight, CURB_WIDTH, isOnAsphalt, nearestOnTrack, type TrackData, 
 import { TerrainField } from './terrain';
 import {VEHICLES,type VehicleId,type VehicleProfile} from './vehicles';
 import {AssistedVehicle} from './abs';
+import {firstGridPose} from './start-grid';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
 export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number;kerbLeft:number;kerbRight:number;grassLeft:number;grassRight:number }
@@ -99,10 +100,11 @@ export class KartPhysics {
     }
     this.reset();
   }
-  reset(index=0){
+  reset(index?:number){
     if(!this.track)return;
     this.setStaged(false);this.clearTrackLimits();this.telemetry.fourWheelsOutside=false;
-    const samples=this.track.samples,count=samples.length,startIndex=Math.max(0,index)%count,s=samples[startIndex];
+    const samples=this.track.samples,count=samples.length,grid=index===undefined?firstGridPose(this.track):null;
+    const startIndex=grid?.index??Math.max(0,index??0)%count,s=grid?.sample??samples[startIndex];
     this.body.quaternion.setFromEuler(0,Math.atan2(-s.tx,-s.tz),0);
     // Start on the wheel support plane, including bridge ramps. A level reset
     // on a hill can bury the nose before the suspension gets its first step.

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { parseTerrain, type TerrainData } from './terrain';
 import {trackFeatures,type TrackFeatures} from './track-features';
 import {drapeTriangles,type TerrainGrid} from './terrain-mesh';
+import {racingLineOffsets} from './racing-line';
 
 export interface Point { x: number; z: number }
 export type SegmentKind = 'straight' | 'curve' | 'hairpin';
@@ -126,7 +127,7 @@ export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>numb
 export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
 export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid?:TerrainGrid){
-  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],n=track.samples.length;
+  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],kerbTraffic:number[]=[],n=track.samples.length,line=racingLineOffsets(track);
   // Submit both edges in route order: later segments cover earlier kerbs.
   for(let i=0;i<n;i++)for(const side of [-1,1]){
     const mask=side>0?track.features.left:track.features.right;if(!mask[i]&&!mask[(i+1)%n])continue;
@@ -153,10 +154,14 @@ export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number
         const x=data.vertices[v],z=data.vertices[v+2],t=Math.max(0,Math.min(1,((x-a.x)*spanX+(z-a.z)*spanZ)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t;
         const lateral=((x-a.x-spanX*t)*nx+(z-a.z-spanZ*t)*nz)*side,localWidth=CURB_WIDTH*(mask[i]+(mask[j]-mask[i])*t);
         kerbUvs.push(start+(end-start)*t,Math.max(0,Math.min(1,(lateral-track.width/2)/Math.max(.001,localWidth))));
+        // The outer tyre and a spread of slightly different laps approach
+        // this edge most often at the apex, turn-in and corner exit.
+        const wheelGap=Math.max(0,track.width/2-(line[i]+(line[j]-line[i])*t)*side-.64);
+        kerbTraffic.push(Math.exp(-((wheelGap/.9)**2)));
       }
     }
   }
-  return {vertices,indices,colors,kerbUvs};
+  return {vertices,indices,colors,kerbUvs,kerbTraffic};
 }
 
 export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:number;signedDistance:number;sample:TrackSample} {

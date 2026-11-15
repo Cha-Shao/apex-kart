@@ -13,10 +13,13 @@ import {drapeTriangles} from './terrain-mesh';
 import {tyreGeometry} from './surface-materials';
 import {ContactShadow} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
+import {racingLineOffsets} from './racing-line';
+import {START_LIGHT_COUNT} from './start-signal';
+import {startGridSlots} from './start-grid';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
-const SURFACE_ORDER={depth:10,runoff:20,kerb:30,white:40,asphalt:50} as const;
+const SURFACE_ORDER={depth:10,runoff:20,kerb:30,white:40,asphalt:50,start:60} as const;
 export class GameScene {
   renderer:THREE.WebGLRenderer;
   scene=new THREE.Scene();
@@ -56,6 +59,7 @@ export class GameScene {
   private detailLayers:DetailLayer[]=[];
   private contactShadow=new ContactShadow();
   private surfaceDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true});
+  private startLightMaterials:THREE.MeshStandardMaterial[]=[];
   onContextLost=()=>{};
   constructor(public container:HTMLElement,physics:KartPhysics){
     this.physics=physics;
@@ -157,13 +161,13 @@ export class GameScene {
     mesh.name=name;mesh.renderOrder=order;mesh.receiveShadow=true;this.circuit.add(depth,mesh);return mesh;
   }
   private ribbon(track:TrackData,offset:number,width:number,color:number,road=false){
-    const positions:number[]=[],indices:number[]=[],roadUvs:number[]=[],n=track.samples.length;
+    const positions:number[]=[],indices:number[]=[],roadUvs:number[]=[],n=track.samples.length,line=road?racingLineOffsets(track):[];
     for(let i=0;i<n;i++){const j=(i+1)%n,a=track.samples[i],b=track.samples[j],points=[];
       for(const [s,o] of [[a,offset-width/2],[a,offset+width/2],[b,offset-width/2],[b,offset+width/2]] as const)points.push({x:s.x+s.nx*o,z:s.z+s.nz*o});
       const [p,q,r,s]=points,dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz,h0=bridgeHeight(track,i),h1=bridgeHeight(track,j);
       const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1)));return this.terrain.sample(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},this.terrain),base=positions.length/3;
       for(const v of data.vertices)positions.push(v);for(const index of data.indices)indices.push(base+index);
-      if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral/(track.width*.5),a.curvature+(b.curvature-a.curvature)*t);}
+      if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral,line[i]+(line[j]-line[i])*t);}
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);
     const surfaceMaterial=road?this.assets.asphalt:material(color);if(road){surfaceUVs(geo,2.1);geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,3));}
@@ -175,6 +179,35 @@ export class GameScene {
     if(surface===this.assets.concrete||surface===this.assets.roof)for(let i=0;i<p.count;i++)uv.setXY(i,(Math.abs(n.getX(i))>.5?p.getZ(i):p.getX(i))/2,(Math.abs(n.getY(i))>.5?p.getZ(i):p.getY(i))/2);
     const mesh=new THREE.Mesh(geometry,surface);mesh.position.set(x,y+(group===this.scenery?this.terrain.sample(x,z):0),z);mesh.castShadow=true;mesh.receiveShadow=true;group.add(mesh);return mesh;
   }
+  private addStartMarkings(track:TrackData){
+    const positions:number[]=[],indices:number[]=[],n=track.samples.length,step=track.length/n;
+    // Paint follows the road's own segments and terrain triangles, including
+    // the branch behind the start line when a circuit crosses itself.
+    const stripe=(from:number,to:number,left:number,right:number)=>{
+      for(let segment=Math.floor(from/step);segment<Math.ceil(to/step);segment++){
+        const i=(segment%n+n)%n,j=(i+1)%n,a=track.samples[i],b=track.samples[j],dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
+        const t0=(Math.max(from,segment*step)-segment*step)/step,t1=(Math.min(to,(segment+1)*step)-segment*step)/step;
+        if(t1-t0<1e-8)continue;
+        const point=(t:number,offset:number)=>({x:a.x+dx*t+(a.nx+(b.nx-a.nx)*t)*offset,z:a.z+dz*t+(a.nz+(b.nz-a.nz)*t)*offset});
+        const p=point(t0,left),q=point(t0,right),r=point(t1,left),s=point(t1,right),h0=bridgeHeight(track,i),h1=bridgeHeight(track,j);
+        const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1)));return this.terrain.sample(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},this.terrain),base=positions.length/3;
+        for(const v of data.vertices)positions.push(v);for(const index of data.indices)indices.push(base+index);
+      }
+    };
+    stripe(-.14,.14,-track.width/2+.42,track.width/2-.42);
+    const line=.11;
+    for(const {front,back,left,right} of startGridSlots(track.width)){
+      stripe(front-line,front,left,right);
+      stripe(back,front-line,left,left+line);stripe(back,front-line,right-line,right);
+    }
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();if(!track.bridges.length)terrainNormals(geometry,this.terrain);
+    // A colour overlay on the asphalt, with normal depth occlusion and no
+    // raised geometry, collision bodies or shadows from painted markings.
+    this.addSurface(new THREE.Mesh(geometry,material(0xf2f1e6)),SURFACE_ORDER.start,'start-grid-paint');
+  }
+  setStartLights(litCount:number){
+    this.startLightMaterials.forEach((lamp,i)=>{const lit=i<litCount;lamp.color.setHex(lit?0xff493d:0x321b19);lamp.emissive.setHex(lit?0xff1c0c:0x000000);lamp.emissiveIntensity=lit?2.4:0;});
+  }
   private makeLandscape(){
     this.clearGroup(this.landscape);const f=this.terrain,n=f.resolution,positions:number[]=[],colors:number[]=[],indices:number[]=[],base=new THREE.Color(0xffffff),high=new THREE.Color(0xe6dfc9),low=new THREE.Color(0xdce7cc);
     for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=base.clone().lerp(h>=0?high:low,Math.min(.55,Math.abs(h)/70));color.multiplyScalar(.9+.1*Math.sin(wx*.025)*Math.cos(wz*.019));positions.push(wx,h-.025,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
@@ -185,7 +218,7 @@ export class GameScene {
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
     this.tyreSmoke.clear();this.slipDuration=[0,0];
-    this.track=track;this.terrain=terrain.refined().clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);const rendered=surfaceTrack(track);
+    this.track=track;this.terrain=terrain.refined().clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
     const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,2.1);this.addSurface(new THREE.Mesh(runoffGeo,this.assets.runoff),SURFACE_ORDER.runoff,'track-runoff');
@@ -197,16 +230,20 @@ export class GameScene {
       this.ribbon(rendered,side*(lineOuter+edgeWidth*.5),edgeWidth,0x414b4b,true);
       this.ribbon(rendered,side*lineOffset,lineWidth,0xe5e8d7);
     }
-    const data=curbGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setAttribute('kerbUv',new THREE.Float32BufferAttribute(data.kerbUvs,2));geo.setIndex(data.indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);surfaceUVs(geo,1.2);this.addSurface(new THREE.Mesh(geo,this.assets.kerb),SURFACE_ORDER.kerb,'textured-kerbs');
-    // Checkered grid and a real start gantry aligned to the first track tangent.
-    const start=track.samples[0],yaw=Math.atan2(-start.tx,-start.tz),grid=new THREE.Group();grid.position.set(start.x,this.terrain.sample(start.x,start.z)+bridgeHeight(track,0)+.03,start.z);grid.rotation.y=yaw;grid.renderOrder=60;this.circuit.add(grid);
-    for(let row=0;row<3;row++)for(let col=0;col<Math.ceil(track.width/.62);col++)this.box(grid,-half+.31+col*.62,.005,(row-1)*.62,.62,.012,.62,(row+col)%2===0?0xf4f1e1:0x263738);
-    for(let k=1;k<=5;k++){this.box(grid,-track.width*.23,.012,k*4.1,.09,.015,1.7,0xc4c9b7);this.box(grid,track.width*.23,.012,k*4.1+2,.09,.015,1.7,0xc4c9b7);}
+    const data=curbGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setAttribute('kerbUv',new THREE.Float32BufferAttribute(data.kerbUvs,2));geo.setAttribute('kerbTraffic',new THREE.Float32BufferAttribute(data.kerbTraffic,1));geo.setIndex(data.indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);surfaceUVs(geo,1.2);this.addSurface(new THREE.Mesh(geo,this.assets.kerb),SURFACE_ORDER.kerb,'textured-kerbs');
+    // White surface paint and an APEX gantry aligned to the start tangent.
+    this.addStartMarkings(rendered);
+    const start=track.samples[0],yaw=Math.atan2(-start.tx,-start.tz),grid=new THREE.Group();grid.position.set(start.x,this.terrain.sample(start.x,start.z)+bridgeHeight(track,0)+.03,start.z);grid.rotation.y=yaw;this.circuit.add(grid);
     for(const side of [-1,1])this.box(grid,(half+1.4)*side,2.8,0,.25,5.6,.25,0x263d3e);
     this.box(grid,0,5.45,0,track.width+3.4,1.25,.45,0x253c3d);
     const sign=this.sign('APEX  /  KART CLUB',track.width+2.9,.83);sign.position.set(0,5.48,.25);grid.add(sign);
     const back=this.sign('APEX  /  KART CLUB',track.width+2.9,.83);back.position.set(0,5.48,-.25);back.rotation.y=Math.PI;grid.add(back);
-    for(let i=0;i<5;i++){const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,8,8),new THREE.MeshStandardMaterial({color:0xc5ef4e,emissive:0x486612,emissiveIntensity:.5}));lamp.position.set((i-2)*.44,4.68,0);grid.add(lamp);}
+    // Four round lamps in one rail, shared with the HUD signal.
+    this.box(grid,0,4.58,0,3.48,.6,.38,0x152326);
+    for(let i=0;i<START_LIGHT_COUNT;i++){
+      const lens=new THREE.MeshStandardMaterial({color:0x321b19,roughness:.38,emissiveIntensity:0});
+      const lamp=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.4,24),lens);lamp.rotation.x=Math.PI/2;lamp.position.set((i-(START_LIGHT_COUNT-1)/2)*.78,4.58,0);grid.add(lamp);this.startLightMaterials.push(lens);
+    }
     for(const bridge of track.bridges){const s=track.samples[bridge.index],height=bridge.height;for(const side of [-1,1]){const x=s.x+s.nx*(half+.4)*side,z=s.z+s.nz*(half+.4)*side;this.box(this.circuit,x,this.terrain.sample(x,z)+height/2,z,.35,height,.35,0x73877c);}}
     this.addScenery();this.addBrakeBoards();this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.renderer.shadowMap.needsUpdate=true;if(reframe)this.frameTrack();
   }

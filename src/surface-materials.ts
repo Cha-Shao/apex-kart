@@ -128,8 +128,11 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       diffuseColor.rgb*=1.0-repairMask*.14;
     `:'';
     const roadAlbedo=roadWear?`
-      float rubberCenter=clamp(vRoadUv.z*65.0,-.54,.54);
-      float rubberTrack=exp(-pow((vRoadUv.y-rubberCenter-.14)*9.0,2.0))+exp(-pow((vRoadUv.y-rubberCenter+.14)*9.0,2.0));
+      // Lateral position and the shared racing line are both in metres.
+      float rubberCenter=vRoadUv.z;
+      vec2 rubberDistance=(vec2(vRoadUv.y-rubberCenter)+vec2(-.64,.64))*2.8;
+      vec2 rubberBands=exp(-rubberDistance*rubberDistance);
+      float rubberTrack=rubberBands.x+rubberBands.y;
       float rubberCoverage=.3+.7*surfaceNoise(vec2(vRoadUv.x/28.0,29.0));
       diffuseColor.rgb*=1.0-min(1.0,rubberTrack)*rubberCoverage*.095;
     `:'';
@@ -156,7 +159,7 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       .replace('#include <normal_fragment_maps>',normalChunk)
       .replace('#include <lights_physical_fragment>',`#include <lights_physical_fragment>\nmaterial.specularColor*=${specular.toFixed(4)};material.specularF90*=${specular.toFixed(4)};`);
   };
-  material.customProgramCacheKey=()=>`stochastic-relief-v5-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${roadWear}-${albedoGain}`;
+  material.customProgramCacheKey=()=>`stochastic-relief-v6-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${roadWear}-${albedoGain}`;
   material.userData.stochastic=true;return material;
 }
 
@@ -210,15 +213,27 @@ export function asphaltAggregateTexture(){
   const texture=new THREE.DataTexture(data,size,size);texture.name='asphalt-aggregate-normal-roughness';texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.generateMipmaps=true;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.magFilter=THREE.LinearFilter;texture.needsUpdate=true;texture.userData.sharedCC0=true;return texture;
 }
 
-/** Painted concrete stays matte while retaining variations in its roughness map. */
+/** Matte painted concrete with inner-edge grime and racing-line tyre deposits. */
 export function paintedSurface(material:THREE.MeshStandardMaterial){
   material.onBeforeCompile=shader=>{
-    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 kerbUv;varying vec2 vKerbUv;').replace('#include <uv_vertex>','#include <uv_vertex>\nvKerbUv=kerbUv;');
-    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nvarying vec2 vKerbUv;\n${stochasticGLSL}
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 kerbUv;attribute float kerbTraffic;varying vec2 vKerbUv;varying float vKerbTraffic;').replace('#include <uv_vertex>','#include <uv_vertex>\nvKerbUv=kerbUv;vKerbTraffic=kerbTraffic;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nvarying vec2 vKerbUv;varying float vKerbTraffic;\n${stochasticGLSL}
       float kerbJoint(vec2 uv){float local=mod(uv.x,.54);float width=max(.006,fwidth(uv.x)*.65);return 1.0-smoothstep(width,width+.009,min(local,.54-local));}
       float kerbVisualHeight(vec2 uv){
         float nearFade=1.0-smoothstep(.018,.09,fwidth(uv.x));
         return uv.y*.055-kerbJoint(uv)*.0045*nearFade;
+      }
+      float kerbRubberMask(vec2 uv,float traffic){
+        // kerbUv.y is zero at the asphalt, on either side of the track.
+        float buildup=surfaceNoise(vec2(uv.x*.19,37.0));
+        float reach=.27+.14*buildup+traffic*.25;
+        float innerEdge=1.0-smoothstep(reach*.18,reach,uv.y);
+        float patches=surfaceNoise(vec2(uv.x*.72,uv.y*8.0+13.0));
+        float coverage=smoothstep(.23,.73,buildup)*(.24+.76*smoothstep(.2,.8,patches));
+        // Long, broken streaks soften away before their fine detail can shimmer.
+        float nearFade=(1.0-smoothstep(.018,.09,fwidth(uv.x)))*(1.0-smoothstep(.006,.025,fwidth(uv.y)));
+        float streaks=mix(.84,.68+.32*surfaceNoise(vec2(uv.x*1.3,uv.y*64.0+buildup*3.0)),nearFade);
+        return innerEdge*(.46+.54*coverage)*(.35+.65*traffic)*streaks;
       }
       vec3 kerbReliefNormal(vec3 n,float height){
         vec3 sx=dFdx(-vViewPosition),sy=dFdy(-vViewPosition),rx=cross(sy,n),ry=cross(n,sx);float det=dot(sx,rx);
@@ -232,14 +247,20 @@ export function paintedSurface(material:THREE.MeshStandardMaterial){
         float kerbWear=smoothstep(.83,1.0,vKerbUv.y)*surfaceNoise(vKerbUv*vec2(11.0,27.0));
         diffuseColor.rgb*=1.0-kerbGroove*.27-kerbDirt*.065;
         diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.22,.20,.16),kerbWear*.17);
+        float kerbUse=clamp(vKerbTraffic,0.0,1.0);
+        float kerbGrime=(1.0-smoothstep(.015,.38+kerbUse*.08,vKerbUv.y+(kerbDirt-.5)*.035))*(.8+.2*kerbDirt);
+        diffuseColor.rgb*=1.0-kerbGrime*(.38+.12*kerbUse);
+        float kerbRubber=kerbRubberMask(vKerbUv,kerbUse);
+        diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*.08+vec3(.008,.009,.008),kerbRubber*.93);
       `)
       .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal=kerbReliefNormal(normal,kerbVisualHeight(vKerbUv));')
       .replace('#include <roughnessmap_fragment>',THREE.ShaderChunk.roughnessmap_fragment+`
       #ifdef USE_ROUGHNESSMAP
       roughnessFactor=clamp(.93+(texelRoughness.g-.82)*2.0,.82,1.0);
-      #endif`);
+      #endif
+      roughnessFactor=clamp(roughnessFactor-kerbRubber*.11,.76,1.0);`);
   };
-  material.customProgramCacheKey=()=>'painted-concrete-visual-blocks-v2';return material;
+  material.customProgramCacheKey=()=>'painted-concrete-racing-wear-v4';return material;
 }
 
 /** Smooth tyre shoulders and moulding rings, with the axle on local X. */
