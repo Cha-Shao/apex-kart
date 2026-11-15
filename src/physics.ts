@@ -4,6 +4,7 @@ import { TerrainField } from './terrain';
 import {VEHICLES,type VehicleId,type VehicleProfile} from './vehicles';
 import {AssistedVehicle} from './abs';
 import {firstGridPose} from './start-grid';
+import {guardrailBodies} from './guardrail-collision';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
 export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number;kerbLeft:number;kerbRight:number;grassLeft:number;grassRight:number }
@@ -17,6 +18,7 @@ export class KartPhysics {
   terrainBody:CANNON.Body|null=null;
   private safetyGround!:CANNON.Body;
   private groundMaterial=new CANNON.Material('ground');
+  private guardrailMaterial=new CANNON.Material('guardrail');
   private chassisContact!:CANNON.ContactMaterial;
   killY=-90;
   roadBody:CANNON.Body|null=null;
@@ -46,6 +48,7 @@ export class KartPhysics {
     this.world.defaultContactMaterial.restitution=.08;
     const groundMaterial=this.groundMaterial,chassisMaterial=new CANNON.Material('kart');
     this.chassisContact=new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:.25,restitution:.1,contactEquationStiffness:1e7});this.world.addContactMaterial(this.chassisContact);
+    this.world.addContactMaterial(new CANNON.ContactMaterial(this.guardrailMaterial,chassisMaterial,{friction:.12,restitution:.03,contactEquationStiffness:1e8,contactEquationRelaxation:4}));
     const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);this.safetyGround=ground;
     this.body=new CANNON.Body({mass:165,material:chassisMaterial,linearDamping:.025,angularDamping:.4});
     this.body.allowSleep=false;
@@ -98,6 +101,8 @@ export class KartPhysics {
       for(let i=0;i<count;i++){const a=i*2,b=((i+1)%count)*2;indices.push(a,a+1,b,a+1,b+1,b);}
       const mesh=new CANNON.Trimesh(vertices,indices);this.roadBody=new CANNON.Body({mass:0,shape:mesh,material:this.groundMaterial});this.roadBody.updateAABB();this.world.addBody(this.roadBody);
     }
+    this.barriers=guardrailBodies(track,f,this.guardrailMaterial);
+    for(const barrier of this.barriers)this.world.addBody(barrier);
     this.reset();
   }
   reset(index?:number){

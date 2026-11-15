@@ -20,7 +20,7 @@ export function surfaceTrack(track:TrackData,maxStep=1.2):TrackData{
   const radii=track.runoff.map(r=>r.radius);
   const runoff:RunoffSample[]=Array.from({length:n},(_,i)=>{const u=i/n,p=runoffCurve.getPoint(u),t=runoffCurve.getTangent(u);return{x:p.x,z:p.z,nx:-t.z,nz:t.x,radius:interpolate(radii,u)};});
   const bridges=track.bridges.map(b=>({...b,index:Math.round(b.index/original*n)%n,otherIndex:Math.round(b.otherIndex/original*n)%n}));
-  const result={...track,samples,features,runoff,bridges,runoffRegions:makeRunoffRegions(samples,features,track.width,runoff)};
+  const result={...track,samples,features,runoff,bridges,runoffRegions:makeRunoffRegions(samples,features,track.width,runoff,bridges)};
   const cache=surfaceCache.get(track)??new Map<number,TrackData>();cache.set(maxStep,result);surfaceCache.set(track,cache);return result;
 }
 

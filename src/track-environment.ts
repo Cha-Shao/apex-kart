@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import {CURB_WIDTH,isOnAsphalt,nearestOnTrack,type TrackData,type TrackSample,type Point} from './track';
+import {CURB_WIDTH,isOnAsphalt,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
 import type {TerrainField} from './terrain';
 import type {SceneAssets} from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
 import {surfaceUVs} from './scene-assets';
 import {drapeTriangles} from './terrain-mesh';
+import {addGuardrails} from './guardrails';
+import {FootprintIndex,polygonContains} from './track-footprint';
 
 export interface VegetationPoint extends Point {scale:number;stretch:number;variant:number}
 export interface DetailLayer {object:THREE.Object3D;center:THREE.Vector3;distance:number}
@@ -43,8 +45,12 @@ function point(s:TrackSample,offset:number){return{x:s.x+s.nx*offset,z:s.z+s.nz*
 
 function soilEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets){
   const dense=surfaceTrack(track),positions:number[]=[],colors:number[]=[],indices:number[]=[],n=dense.samples.length;
+  const paved=new FootprintIndex([...roadFootprint(dense.samples,dense.features,dense.width),...dense.runoffRegions]);
+  const retained=(p:Point)=>[...paved.query(p.x,p.x,p.z,p.z)].some(r=>polygonContains(r.points,p));
   for(const side of [-1,1])for(let i=0;i<n;i++){
     const j=(i+1)%n,a=dense.samples[i],b=dense.samples[j],ea=edge(dense,i,side),eb=edge(dense,j,side),width=.32+.24*(.5+.5*Math.sin(a.distance*.19));
+    // A clipped-off runoff must not leave its old soil outline on the grass.
+    if(!retained(point(a,(ea-.04)*side))||!retained(point(b,(eb-.04)*side)))continue;
     const p=point(a,(ea+.02)*side),q=point(a,(ea+width)*side),r=point(b,(eb+.02)*side),s=point(b,(eb+width)*side);
     const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+.007,terrain),base=positions.length/3;
     for(let k=0;k<data.vertices.length;k+=3){
@@ -97,20 +103,8 @@ function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
 }
 
 function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,layers:DetailLayer[]){
-  const posts:Placement[]=[],beams:Placement[]=[],gutters:Placement[]=[],n=track.samples.length,metres=track.length/n,stride=Math.max(1,Math.ceil(5/metres)),safe=(p:Point)=>nearestOnTrack(track,p).distance>track.width*.5+2;
-  for(let i=0;i<n;i+=stride){
-    const j=(i+stride)%n,a=track.samples[i],b=track.samples[j],d=a.distance;
-    if(Math.floor(d/110)%5===3)continue;
-    const side=Math.abs(a.curvature)>.002?-Math.sign(a.curvature):Math.floor(d/240)%2?1:-1,p=point(a,(edge(track,i,side)+3)*side),q=point(b,(edge(track,j,side)+3)*side);
-    if(!safe(p)||!safe(q))continue;const length=Math.hypot(q.x-p.x,q.z-p.z);if(length>15||length<.5)continue;
-    const y0=terrain.sample(p.x,p.z),y1=terrain.sample(q.x,q.z),ry=Math.atan2(-(q.z-p.z),q.x-p.x);
-    for(const h of [.46,.74])beams.push({x:(p.x+q.x)*.5,y:(y0+y1)*.5+h,z:(p.z+q.z)*.5,sx:length+.06,sy:.18,sz:.09,ry});
-    posts.push({x:p.x,y:y0+.42,z:p.z,sx:.10,sy:.84,sz:.13,ry});
-    if(a.kind==='straight'&&Math.floor(d/80)%3===0){const v=point(a,(edge(track,i,side)+.75)*side);gutters.push({x:v.x,y:terrain.sample(v.x,v.z)+.017,z:v.z,sx:Math.min(length,5),sy:.035,sz:.24,ry});}
-  }
-  instances(group,new THREE.BoxGeometry(1,1,1),assets.alloy,beams,'visual Armco beams',true);
-  instances(group,new THREE.BoxGeometry(1,1,1),assets.alloy,posts,'visual Armco posts',true);
-  const drainMaterial=new THREE.MeshStandardMaterial({color:0x454943,metalness:.45,roughness:.85});instances(group,new THREE.BoxGeometry(1,1,1),drainMaterial,gutters,'drainage strips');
+  const n=track.samples.length,safe=(p:Point)=>nearestOnTrack(track,p).distance>track.width*.5+2;
+  addGuardrails(group,track,terrain,layers);
   // A few tyre stacks beyond corner runoff: no collider or invisible wall.
   const walls=track.features.corners.filter(c=>c.approach>30).slice(0,6);
   for(const corner of walls){const i=corner.end,s=track.samples[i],offset=(edge(track,i,corner.side)+2)*corner.side,p=point(s,offset),stack:Placement[]=[];if(!safe(p))continue;

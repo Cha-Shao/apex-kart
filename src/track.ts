@@ -3,12 +3,13 @@ import { parseTerrain, type TerrainData } from './terrain';
 import {trackFeatures,type TrackFeatures} from './track-features';
 import {drapeTriangles,type TerrainGrid} from './terrain-mesh';
 import {racingLineOffsets} from './racing-line';
+import {FootprintIndex,clipHalfPlane,cross2,footprintPolygon,polygonContains,type FootprintPolygon} from './track-footprint';
 
 export interface Point { x: number; z: number }
 export type SegmentKind = 'straight' | 'curve' | 'hairpin';
 export interface TrackSample extends Point { tx: number; tz: number; nx: number; nz: number; curvature: number; kind: SegmentKind; distance: number }
 export interface RunoffSample extends Point {nx:number;nz:number;radius:number}
-export interface RunoffRegion {points:[Point,Point,Point,Point];side:number;index:number;minX:number;maxX:number;minZ:number;maxZ:number}
+export interface RunoffRegion extends FootprintPolygon {side:number}
 export const CURB_WIDTH=1.88;
 // All visual track layers share a plane. Rendering resolves their priority;
 // millimetre height differences must not decide which surface covers another.
@@ -88,12 +89,19 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   let smooth:Point[]=samples.map(s=>({x:s.x,z:s.z}));const radius=Math.max(2,Math.min(100,Math.ceil(14*features.scale/step)));
   for(let pass=0;pass<3;pass++){const previous=smooth;smooth=previous.map((_,i)=>{let x=0,z=0,w=0;const localRadius=Math.max(radius,Math.min(120,Math.ceil((14*features.scale+features.runoffWidth[i]*.5)/step)));for(let j=-localRadius;j<=localRadius;j++){const weight=localRadius+1-Math.abs(j),p=previous[(i+j+n)%n];x+=p.x*weight;z+=p.z*weight;w+=weight;}return{x:x/w,z:z/w};});}
   const runoff:RunoffSample[]=smooth.map((p,i)=>{const a=smooth[(i-2+n)%n],b=smooth[(i+2)%n],dx=b.x-a.x,dz=b.z-a.z,l=Math.hypot(dx,dz)||1;return {...p,nx:-dz/l,nz:dx/l,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]};});
-  const runoffRegions=makeRunoffRegions(samples,features,settings.width,runoff);
+  const runoffRegions=makeRunoffRegions(samples,features,settings.width,runoff,bridges);
   return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)},visualCurve:curve};
 }
 
-export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,roadWidth:number,runoff:RunoffSample[]){
-  const n=samples.length,runoffRegions:RunoffRegion[]=[];
+export function roadFootprint(samples:TrackSample[],features:TrackFeatures,roadWidth:number){
+  const offset=(i:number,side:number)=>{const s=samples[i],w=roadWidth/2+CURB_WIDTH*(side>0?features.left:features.right)[i];return{x:s.x+s.nx*w*side,z:s.z+s.nz*w*side};};
+  return samples.map((_,i)=>{const j=(i+1)%samples.length;return footprintPolygon([offset(i,1),offset(i,-1),offset(j,-1),offset(j,1)],i);});
+}
+
+export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,roadWidth:number,runoff:RunoffSample[],bridges:Bridge[]=[]){
+  const n=samples.length,runoffRegions:RunoffRegion[]=[],road=new FootprintIndex(roadFootprint(samples,features,roadWidth)),step=samples[1].distance-samples[0].distance,length=step*n;
+  const deck=samples.map((_,i)=>bridgeHeight({samples,bridges,length,width:roadWidth},i));
+  const area=(p:Point[])=>Math.abs(p.reduce((sum,a,i)=>{const b=p[(i+1)%p.length];return sum+a.x*b.z-b.x*a.z;},0));
   for(const side of [-1,1])for(let i=0;i<n;i++){const widths=side>0?features.runoffLeft:features.runoffRight,j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;
     const edge=(k:number):[Point,Point]=>{
       const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=roadWidth/2+CURB_WIDTH*kerb,a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
@@ -103,28 +111,53 @@ export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,r
       let nx=s.nx*.7+r.nx*.3,nz=s.nz*.7+r.nz*.3;const norm=Math.hypot(nx,nz)||1;nx/=norm;nz/=norm;
       return [a,{x:a.x+nx*side*width,z:a.z+nz*side*width}];
     };
-    const [a,b]=edge(i),[c,d]=edge(j),points:[Point,Point,Point,Point]=[a,b,c,d];runoffRegions.push({points,side,index:i,minX:Math.min(...points.map(p=>p.x)),maxX:Math.max(...points.map(p=>p.x)),minZ:Math.min(...points.map(p=>p.z)),maxZ:Math.max(...points.map(p=>p.z))});
+    const [a,b]=edge(i),[c,d]=edge(j),source={x:(a.x+c.x)/2,z:(a.z+c.z)/2},bounds=footprintPolygon([a,b,c,d],i);
+    const blockers=[...road.query(bounds.minX,bounds.maxX,bounds.minZ,bounds.maxZ)].filter(r=>{
+      const delta=Math.abs(r.index-i),separation=Math.min(delta,n-delta);return separation>2&&separation*step>roadWidth*1.1&&Math.abs(deck[i]-deck[r.index])<1;
+    }).sort((a,b)=>Math.hypot(samples[a.index].x-source.x,samples[a.index].z-source.z)-Math.hypot(samples[b.index].x-source.x,samples[b.index].z-source.z));
+    // Stop at the first neighbouring road. Subtracting only its asphalt would
+    // leave a disconnected runoff lobe on the far side of the straight.
+    for(const triangle of [[a,b,c],[b,d,c]]){
+      let points:Point[]=triangle;
+      for(const blocker of blockers){
+        const polygon=blocker.points,orientation=Math.sign(polygon.reduce((sum,p,k)=>{const q=polygon[(k+1)%polygon.length];return sum+p.x*q.z-q.x*p.z;},0))||1;
+        let overlap=points,cutA:Point|undefined,cutB:Point|undefined,cutDistance=0,lateralA:Point|undefined,lateralB:Point|undefined,lateralDistance=0;
+        for(let k=0;k<polygon.length;k++){
+          const p=polygon[k],q=polygon[(k+1)%polygon.length],signed=cross2(p,q,source)*orientation/(Math.hypot(q.x-p.x,q.z-p.z)||1);
+          overlap=clipHalfPlane(overlap,p,q,orientation);
+          if(signed<cutDistance){cutDistance=signed;cutA=p;cutB=q;}
+          // Prefer the road's long edge to individual segment end caps. This
+          // keeps a continuous clipping line along a neighbouring straight.
+          if((k===1||k===3)&&signed<lateralDistance){lateralDistance=signed;lateralA=p;lateralB=q;}
+        }
+        if(overlap.length<3||area(overlap)<1e-6)continue;
+        if(lateralA&&lateralB){cutA=lateralA;cutB=lateralB;}
+        if(!cutA||!cutB){points=[];break;}
+        points=clipHalfPlane(points,cutA,cutB,-orientation);if(points.length<3)break;
+      }
+      if(points.length>=3&&area(points)>1e-6)runoffRegions.push({...footprintPolygon(points,i),side});
+    }
   }
   return runoffRegions;
 }
 
 export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number,knownNear?:ReturnType<typeof nearestOnTrack>){
   const near=knownNear??nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;const kerb=(near.signedDistance>=0?track.features.left:track.features.right)[near.index];if(kerb>0&&d<=track.width/2+CURB_WIDTH*kerb)return true;
-  const triangle=(a:Point,b:Point,c:Point)=>{const cross=(u:Point,v:Point)=>(v.x-u.x)*(p.z-u.z)-(v.z-u.z)*(p.x-u.x),area=(b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x);if(Math.abs(area)<1e-7)return false;const x=cross(a,b),y=cross(b,c),z=cross(c,a);return x>=-1e-6&&y>=-1e-6&&z>=-1e-6||x<=1e-6&&y<=1e-6&&z<=1e-6;};
-  for(const r of track.runoffRegions){if(p.x<r.minX||p.x>r.maxX||p.z<r.minZ||p.z>r.maxZ)continue;const [a,b,c,d]=r.points;if(triangle(a,b,c)||triangle(b,d,c))return true;}return false;
+  for(const r of track.runoffRegions){if(p.x<r.minX||p.x>r.maxX||p.z<r.minZ||p.z>r.maxZ)continue;if(polygonContains(r.points,p))return true;}return false;
 }
 export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid:TerrainGrid){
   const vertices:number[]=[],indices:number[]=[];
   for(const r of track.runoffRegions){
-    const [a,b,c,d]=r.points,start=track.samples[r.index],end=track.samples[(r.index+1)%track.samples.length],dx=end.x-start.x,dz=end.z-start.z,length2=dx*dx+dz*dz;
+    const start=track.samples[r.index],end=track.samples[(r.index+1)%track.samples.length],dx=end.x-start.x,dz=end.z-start.z,length2=dx*dx+dz*dz;
     const h0=bridgeHeight(track,r.index),h1=bridgeHeight(track,(r.index+1)%track.samples.length);
-    const data=drapeTriangles([[a,b,c],[b,d,c]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-start.x)*dx+(z-start.z)*dz)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},grid),base=vertices.length/3;
+    const triangles=r.points.slice(1,-1).map((p,k)=>[r.points[0],p,r.points[k+2]]);
+    const data=drapeTriangles(triangles,(x,z)=>{const t=Math.max(0,Math.min(1,((x-start.x)*dx+(z-start.z)*dz)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},grid),base=vertices.length/3;
     for(const v of data.vertices)vertices.push(v);for(const i of data.indices)indices.push(base+i);
   }
   return {vertices,indices};
 }
 
-export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
+export function bridgeHeight(track:Pick<TrackData,'samples'|'bridges'|'length'|'width'>,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
 export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid?:TerrainGrid){
   const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],kerbTraffic:number[]=[],n=track.samples.length,line=racingLineOffsets(track);
