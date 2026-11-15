@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HDRLoader} from 'three/addons/loaders/HDRLoader.js';
-import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,paintedSurface} from './surface-materials';
+import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,paintedSurface,type RoadWearUniforms} from './surface-materials';
+import {roadWearTexture} from './road-wear';
+import type {TrackData} from './track';
 
 const BASE='/assets/cc0/';
 /** UVs in metres keep road/ground texture scale identical across every circuit. */
@@ -44,17 +46,20 @@ export class SceneAssets {
   readonly tyre=tyreMaterial();
   private readonly asphaltAggregate=asphaltAggregateTexture();
   private readonly grassRelief=grassReliefTexture();
+  private readonly roadWear:RoadWearUniforms={map:{value:null},size:{value:new THREE.Vector2(1,1)}};
+  private readonly maxTextureSize:number;
   sunDirection=new THREE.Vector3(-.52,.78,.35).normalize();
   private readonly anisotropy:number;
   private readonly loader=new THREE.TextureLoader();
   constructor(renderer:THREE.WebGLRenderer,scene:THREE.Scene,invalidate:()=>void){
     this.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());this.asphaltAggregate.anisotropy=this.anisotropy;this.grassRelief.anisotropy=this.anisotropy;
+    this.maxTextureSize=renderer.capabilities.maxTextureSize;
     this.invalidate=invalidate;
     // Combine source blade normals with centimetre-scale tufts; keep a dry,
     // rough surface while allowing the sun to reveal changes in orientation.
     this.grass=stochasticSurface(this.pbr('grass',0xffffff,.94,1.35),2,.24,{roughnessCenter:.94,sourceRoughness:.55,roughnessContrast:.38,roughnessMin:.86,roughnessMax:1,specular:.65,aggregate:this.grassRelief,aggregateStrength:1.1,ground:'grass'});this.grass.vertexColors=true;this.grass.envMapIntensity=.3;
     // Source macro relief is restrained; stone detail comes from the packed aggregate.
-    this.asphalt=stochasticSurface(this.pbr('clean_asphalt',0xa5abb2,.9,1.05),2.1,.14,{roughnessCenter:.88,sourceRoughness:.66,roughnessContrast:1.1,roughnessMin:.76,roughnessMax:.99,specular:.7,aggregate:this.asphaltAggregate,aggregateStrength:1.25,ground:'asphalt',roadWear:true});this.asphalt.envMapIntensity=.55;
+    this.asphalt=stochasticSurface(this.pbr('clean_asphalt',0xa5abb2,.9,1.05),2.1,.14,{roughnessCenter:.88,sourceRoughness:.66,roughnessContrast:1.1,roughnessMin:.76,roughnessMax:.99,specular:.7,aggregate:this.asphaltAggregate,aggregateStrength:1.25,ground:'asphalt',roadWear:this.roadWear});this.asphalt.envMapIntensity=.55;
     this.runoff=stochasticSurface(this.pbr('clean_asphalt',0xf2f3f4,.94,.9),2.1,.16,{roughnessCenter:.93,sourceRoughness:.66,roughnessContrast:.9,roughnessMin:.83,roughnessMax:1,specular:.55,aggregate:this.asphaltAggregate,aggregateStrength:1.05,albedoGain:1.15,ground:'asphalt'});this.runoff.envMapIntensity=.4;
     this.concrete=this.pbr('concrete_layers_02',0xd9d9d4,.94,.45);
     this.roof=this.pbr('corrugated_iron',0x73808b,.65,.5);this.roof.metalness=.75;
@@ -105,6 +110,11 @@ export class SceneAssets {
     });
   }
   private invalidate:()=>void;
+  setRoadWear(track:TrackData){
+    const previous=this.roadWear.map.value,texture=roadWearTexture(track,this.maxTextureSize);
+    texture.anisotropy=this.anisotropy;this.roadWear.map.value=texture;
+    this.roadWear.size.value.set(track.length,track.width);previous?.dispose();
+  }
   private texture(id:string,channel:string,repeat=1){
     const key=`${id}/${channel}/${repeat}`;let texture=this.textures.get(key);if(texture)return texture;
     texture=this.loader.load(`${BASE}${id}-${channel}.webp`,()=>this.invalidate(),undefined,error=>{this.failures.push(`${key}: ${String(error)}`);});

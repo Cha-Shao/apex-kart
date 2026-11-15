@@ -90,6 +90,10 @@ vec4 surfaceAggregateSample(sampler2D tex,vec2 uv){
 }
 `;
 
+export interface RoadWearUniforms {
+  map:{value:THREE.Texture|null};
+  size:{value:THREE.Vector2};
+}
 interface ReliefSettings {
   roughnessCenter?:number;
   roughnessContrast?:number;
@@ -101,13 +105,14 @@ interface ReliefSettings {
   aggregate?:THREE.Texture;
   aggregateStrength?:number;
   ground?:'grass'|'asphalt';
-  roadWear?:boolean;
+  roadWear?:RoadWearUniforms;
   albedoGain?:number;
 }
 export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:number,variation:number,settings:ReliefSettings={}){
-  const {roughnessCenter=.9,roughnessContrast=1,roughnessMin=.78,roughnessMax=1,sourceRoughness=.65,specular=1,aggregate,aggregateStrength=.8,ground,roadWear=false,albedoGain=1}=settings;
+  const {roughnessCenter=.9,roughnessContrast=1,roughnessMin=.78,roughnessMax=1,sourceRoughness=.65,specular=1,aggregate,aggregateStrength=.8,ground,roadWear,albedoGain=1}=settings;
   material.onBeforeCompile=shader=>{
     if(aggregate)shader.uniforms.surfaceAggregateMap={value:aggregate};
+    if(roadWear){shader.uniforms.roadWearMap=roadWear.map;shader.uniforms.roadWearSize=roadWear.size;}
     const mapChunk=THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )','surfaceColor( map, vMapUv )');
     const aggregateMap=aggregate?`
       #ifdef USE_MAP
@@ -128,24 +133,22 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       diffuseColor.rgb*=1.0-repairMask*.14;
     `:'';
     const roadAlbedo=roadWear?`
-      // Lateral position and the shared racing line are both in metres.
-      float rubberCenter=vRoadUv.z;
-      vec2 rubberDistance=(vec2(vRoadUv.y-rubberCenter)+vec2(-.64,.64))*2.8;
-      vec2 rubberBands=exp(-rubberDistance*rubberDistance);
-      float rubberTrack=rubberBands.x+rubberBands.y;
-      float rubberCoverage=.3+.7*surfaceNoise(vec2(vRoadUv.x/28.0,29.0));
-      diffuseColor.rgb*=1.0-min(1.0,rubberTrack)*rubberCoverage*.095;
+      vec2 rubberUv=vec2(vRoadUv.y/roadWearSize.y+.5,vRoadUv.x/roadWearSize.x);
+      float roadRubber=texture2D(roadWearMap,rubberUv).r;
+      // Retain the asphalt grain beneath dry, dark rubber deposits.
+      diffuseColor.rgb*=1.0-roadRubber*.82;
     `:'';
     const roughnessChunk=`
       float roughnessFactor=roughness;
       #ifdef USE_ROUGHNESSMAP
       float surfaceRoughness=surfaceSample(roughnessMap,vRoughnessMapUv).g;
       roughnessFactor=clamp(${roughnessCenter.toFixed(4)}+(surfaceRoughness-${sourceRoughness.toFixed(4)})*${roughnessContrast.toFixed(4)}${aggregateRoughness},${roughnessMin.toFixed(4)},${roughnessMax.toFixed(4)});
-      #endif`;
+      #endif
+      ${roadWear?'#ifdef USE_MAP\nroughnessFactor=max(.72,roughnessFactor-roadRubber*.13);\n#endif':''}`;
     let normalChunk=THREE.ShaderChunk.normal_fragment_maps.replaceAll('texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0','surfaceNormal( normalMap, vNormalMapUv )');
     if(aggregate)normalChunk=normalChunk.replace('mapN.xy *= normalScale;',`mapN.xy *= normalScale;\nmapN=normalize(vec3(mapN.xy/max(mapN.z,.1)+(surfaceAggregate.rg*2.0-1.0)*${aggregateStrength.toFixed(4)},1.0));`);
-    if(roadWear)shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 roadUv;varying vec3 vRoadUv;').replace('#include <uv_vertex>','#include <uv_vertex>\nvRoadUv=roadUv;');
-    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\n${aggregate?'uniform sampler2D surfaceAggregateMap;':''}\n${roadWear?'varying vec3 vRoadUv;':''}\n${ground==='asphalt'?'#define SURFACE_ASPHALT_DETAIL\n':''}${stochasticGLSL}`)
+    if(roadWear)shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 roadUv;varying vec2 vRoadUv;').replace('#include <uv_vertex>','#include <uv_vertex>\nvRoadUv=roadUv;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\n${aggregate?'uniform sampler2D surfaceAggregateMap;':''}\n${roadWear?'varying vec2 vRoadUv;uniform sampler2D roadWearMap;uniform vec2 roadWearSize;':''}\n${ground==='asphalt'?'#define SURFACE_ASPHALT_DETAIL\n':''}${stochasticGLSL}`)
       .replace('#include <map_fragment>',aggregateMap+mapChunk+`
         #ifdef USE_MAP
         float surfaceMacro=surfaceNoise(vMapUv*${(metres/37).toFixed(8)})*.7+surfaceNoise(vMapUv*${(metres/103).toFixed(8)}+31.0)*.3;
@@ -159,7 +162,7 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       .replace('#include <normal_fragment_maps>',normalChunk)
       .replace('#include <lights_physical_fragment>',`#include <lights_physical_fragment>\nmaterial.specularColor*=${specular.toFixed(4)};material.specularF90*=${specular.toFixed(4)};`);
   };
-  material.customProgramCacheKey=()=>`stochastic-relief-v6-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${roadWear}-${albedoGain}`;
+  material.customProgramCacheKey=()=>`stochastic-relief-v7-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${!!roadWear}-${albedoGain}`;
   material.userData.stochastic=true;return material;
 }
 

@@ -13,13 +13,13 @@ import {drapeTriangles} from './terrain-mesh';
 import {tyreGeometry} from './surface-materials';
 import {ContactShadow} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
-import {racingLineOffsets} from './racing-line';
 import {START_LIGHT_COUNT} from './start-signal';
 import {startGridSlots} from './start-grid';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
 const SURFACE_ORDER={depth:10,runoff:20,kerb:30,white:40,asphalt:50,start:60} as const;
+const ENVIRONMENT_FOG_DENSITY=.00076;
 export class GameScene {
   renderer:THREE.WebGLRenderer;
   scene=new THREE.Scene();
@@ -71,7 +71,7 @@ export class GameScene {
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=.92;
     container.append(this.renderer.domElement);this.renderer.domElement.setAttribute('aria-label','3D 卡丁车赛道。拖动旋转视角，滚轮缩放。');
     this.renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.onContextLost();});
-    this.scene.background=new THREE.Color(0xb9d7ed);this.scene.fog=new THREE.FogExp2(0xbfcfd5,.00038);
+    this.scene.background=new THREE.Color(0xb9d7ed);this.scene.fog=new THREE.FogExp2(0xbfcfd5,ENVIRONMENT_FOG_DENSITY);
     // Open-sky diffuse light and ground bounce must remain visible on faces
     // opposite the sun. A small neutral fill keeps deep shade from crushing.
     const hemi=new THREE.HemisphereLight(0xd9e8ff,0x8d927c,.85);hemi.name='daylight-sky-and-ground-bounce';
@@ -161,16 +161,16 @@ export class GameScene {
     mesh.name=name;mesh.renderOrder=order;mesh.receiveShadow=true;this.circuit.add(depth,mesh);return mesh;
   }
   private ribbon(track:TrackData,offset:number,width:number,color:number,road=false){
-    const positions:number[]=[],indices:number[]=[],roadUvs:number[]=[],n=track.samples.length,line=road?racingLineOffsets(track):[];
+    const positions:number[]=[],indices:number[]=[],roadUvs:number[]=[],n=track.samples.length;
     for(let i=0;i<n;i++){const j=(i+1)%n,a=track.samples[i],b=track.samples[j],points=[];
       for(const [s,o] of [[a,offset-width/2],[a,offset+width/2],[b,offset-width/2],[b,offset+width/2]] as const)points.push({x:s.x+s.nx*o,z:s.z+s.nz*o});
       const [p,q,r,s]=points,dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz,h0=bridgeHeight(track,i),h1=bridgeHeight(track,j);
       const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1)));return this.terrain.sample(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},this.terrain),base=positions.length/3;
       for(const v of data.vertices)positions.push(v);for(const index of data.indices)indices.push(base+index);
-      if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral,line[i]+(line[j]-line[i])*t);}
+      if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral);}
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);
-    const surfaceMaterial=road?this.assets.asphalt:material(color);if(road){surfaceUVs(geo,2.1);geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,3));}
+    const surfaceMaterial=road?this.assets.asphalt:material(color);if(road){surfaceUVs(geo,2.1);geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));}
     return this.addSurface(new THREE.Mesh(geo,surfaceMaterial),road?SURFACE_ORDER.asphalt:SURFACE_ORDER.white,road?'track-asphalt':'track-white-line');
   }
   private box(group:THREE.Group,x:number,y:number,z:number,w:number,h:number,d:number,color:number){
@@ -219,6 +219,7 @@ export class GameScene {
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
     this.tyreSmoke.clear();this.slipDuration=[0,0];
     this.track=track;this.terrain=terrain.refined().clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);
+    this.assets.setRoadWear(track);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
     const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,2.1);this.addSurface(new THREE.Mesh(runoffGeo,this.assets.runoff),SURFACE_ORDER.runoff,'track-runoff');
@@ -322,9 +323,9 @@ export class GameScene {
     if(!this.track)return;const b=this.track.bounds;const center=new THREE.Vector3((b.minX+b.maxX)/2,(this.terrain.min+this.terrain.max)/2,(b.minZ+b.maxZ)/2);
     const size=Math.max(b.maxX-b.minX,(b.maxZ-b.minZ)*1.35);const aspect=Math.max(.4,this.camera.aspect),scale=Math.max(1,1.1/aspect);
     this.orbit.target.copy(center);this.camera.position.copy(center).add(new THREE.Vector3(size*.57*scale,size*.90*scale,size*.94*scale));this.camera.lookAt(center);this.orbit.update();
-    const fog=this.scene.fog as THREE.FogExp2,range=this.camera.position.distanceTo(center);fog.density=Math.min(.00038,.5/Math.max(1,range));this.camera.near=Math.max(1,range/2000);this.camera.far=Math.max(1400,range*4);this.camera.updateProjectionMatrix();
+    const fog=this.scene.fog as THREE.FogExp2,range=this.camera.position.distanceTo(center);fog.density=Math.min(ENVIRONMENT_FOG_DENSITY,1/Math.max(1,range));this.camera.near=Math.max(1,range/2000);this.camera.far=Math.max(1400,range*4);this.camera.updateProjectionMatrix();
   }
-  setCamera(mode:CameraMode){this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.FogExp2;fog.density=.00038;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
+  setCamera(mode:CameraMode){this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.FogExp2;fog.density=ENVIRONMENT_FOG_DENSITY;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
