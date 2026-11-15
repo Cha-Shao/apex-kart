@@ -7,7 +7,7 @@ for(const preset of PRESETS)test(`preset ${preset.id} is closed, smooth and driv
   assert.ok(t.length>500&&t.length<1700);
   assert.ok(t.corners>3);assert.ok(t.straightPercent>8);
   const first=t.samples[0],last=t.samples.at(-1)!;
-  assert.ok(Math.hypot(first.x-last.x,first.z-last.z)<2);
+  assert.ok(Math.hypot(first.x-last.x,first.z-last.z)<=t.length/t.samples.length*1.02);
   assert.ok(t.samples.every(s=>Number.isFinite(s.curvature)&&Math.abs(Math.hypot(s.tx,s.tz)-1)<.0001));
   assert.ok(t.samples.some(s=>s.kind==='straight'));assert.ok(t.samples.some(s=>s.kind==='curve'));
 });

@@ -22,7 +22,7 @@ export class TyreSmoke {
     geometry.instanceCount=0;
     const material=new THREE.ShaderMaterial({
       uniforms:{...THREE.UniformsUtils.clone(THREE.UniformsLib.fog)},
-      transparent:true,depthWrite:false,fog:true,
+      transparent:true,depthTest:true,depthWrite:false,fog:true,
       vertexShader:`
         attribute vec3 smokeCenter;
         attribute vec4 smokeParams;
@@ -62,7 +62,10 @@ export class TyreSmoke {
           #include <fog_fragment>
         }`
     });
-    this.mesh=new THREE.Mesh(geometry,material);this.mesh.name='tyre-smoke';this.mesh.frustumCulled=false;this.mesh.visible=false;
+    this.mesh=new THREE.Mesh(geometry,material);this.mesh.name='tyre-smoke';
+    // Ground decals write no depth. Composite smoke after them so its alpha
+    // attenuates marks beneath the cloud, while solid cars/terrain still occlude it.
+    this.mesh.renderOrder=10;this.mesh.frustumCulled=false;this.mesh.visible=false;
   }
 
   emit(wheel:number,position:THREE.Vector3,normal:THREE.Vector3,velocity:{x:number;y:number;z:number},intensity:number,width:number,dt:number){

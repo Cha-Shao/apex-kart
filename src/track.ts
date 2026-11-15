@@ -9,7 +9,10 @@ export interface TrackSample extends Point { tx: number; tz: number; nx: number;
 export interface RunoffSample extends Point {nx:number;nz:number;radius:number}
 export interface RunoffRegion {points:[Point,Point,Point,Point];side:number;index:number;minX:number;maxX:number;minZ:number;maxZ:number}
 export const CURB_WIDTH=1.88;
-export interface TrackData { controls: Point[]; samples: TrackSample[]; features:TrackFeatures;runoff:RunoffSample[]; runoffRegions:RunoffRegion[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
+// All visual track layers share a plane. Rendering resolves their priority;
+// millimetre height differences must not decide which surface covers another.
+export const TRACK_SURFACE_HEIGHT=.018;
+export interface TrackData { controls: Point[]; samples: TrackSample[]; features:TrackFeatures;runoff:RunoffSample[]; runoffRegions:RunoffRegion[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number };visualCurve?:THREE.CatmullRomCurve3 }
 export interface Bridge { index:number;otherIndex:number;distance:number;height:number;halfLength:number }
 export interface BuildOptions { preserveLayout?:boolean;allowCrossings?:boolean }
 export interface RouteMetadata {circuitId:string;scale:'native'|'compact'}
@@ -84,10 +87,15 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   let smooth:Point[]=samples.map(s=>({x:s.x,z:s.z}));const radius=Math.max(2,Math.min(100,Math.ceil(14*features.scale/step)));
   for(let pass=0;pass<3;pass++){const previous=smooth;smooth=previous.map((_,i)=>{let x=0,z=0,w=0;const localRadius=Math.max(radius,Math.min(120,Math.ceil((14*features.scale+features.runoffWidth[i]*.5)/step)));for(let j=-localRadius;j<=localRadius;j++){const weight=localRadius+1-Math.abs(j),p=previous[(i+j+n)%n];x+=p.x*weight;z+=p.z*weight;w+=weight;}return{x:x/w,z:z/w};});}
   const runoff:RunoffSample[]=smooth.map((p,i)=>{const a=smooth[(i-2+n)%n],b=smooth[(i+2)%n],dx=b.x-a.x,dz=b.z-a.z,l=Math.hypot(dx,dz)||1;return {...p,nx:-dz/l,nz:dx/l,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]};});
-  const runoffRegions:RunoffRegion[]=[];
+  const runoffRegions=makeRunoffRegions(samples,features,settings.width,runoff);
+  return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)},visualCurve:curve};
+}
+
+export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,roadWidth:number,runoff:RunoffSample[]){
+  const n=samples.length,runoffRegions:RunoffRegion[]=[];
   for(const side of [-1,1])for(let i=0;i<n;i++){const widths=side>0?features.runoffLeft:features.runoffRight,j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;
     const edge=(k:number):[Point,Point]=>{
-      const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=settings.width/2+CURB_WIDTH*kerb,a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
+      const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=roadWidth/2+CURB_WIDTH*kerb,a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
       // Fade the entire lateral displacement, not just the minimum width.
       // At zero width the outer edge meets the road tangentially.
       const width=widths[k];
@@ -96,7 +104,7 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
     };
     const [a,b]=edge(i),[c,d]=edge(j),points:[Point,Point,Point,Point]=[a,b,c,d];runoffRegions.push({points,side,index:i,minX:Math.min(...points.map(p=>p.x)),maxX:Math.max(...points.map(p=>p.x)),minZ:Math.min(...points.map(p=>p.z)),maxZ:Math.max(...points.map(p=>p.z))});
   }
-  return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
+  return runoffRegions;
 }
 
 export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number,knownNear?:ReturnType<typeof nearestOnTrack>){
@@ -109,7 +117,7 @@ export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>numb
   for(const r of track.runoffRegions){
     const [a,b,c,d]=r.points,start=track.samples[r.index],end=track.samples[(r.index+1)%track.samples.length],dx=end.x-start.x,dz=end.z-start.z,length2=dx*dx+dz*dz;
     const h0=bridgeHeight(track,r.index),h1=bridgeHeight(track,(r.index+1)%track.samples.length);
-    const data=drapeTriangles([[a,b,c],[b,d,c]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-start.x)*dx+(z-start.z)*dz)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+.012;},grid),base=vertices.length/3;
+    const data=drapeTriangles([[a,b,c],[b,d,c]],(x,z)=>{const t=Math.max(0,Math.min(1,((x-start.x)*dx+(z-start.z)*dz)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;},grid),base=vertices.length/3;
     for(const v of data.vertices)vertices.push(v);for(const i of data.indices)indices.push(base+i);
   }
   return {vertices,indices};
@@ -117,18 +125,38 @@ export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>numb
 
 export function bridgeHeight(track:TrackData,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
-export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number){
-  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],n=track.samples.length;
-  for(const side of [-1,1])for(let i=0;i<n;i++){
+export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid?:TerrainGrid){
+  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],n=track.samples.length;
+  // Submit both edges in route order: later segments cover earlier kerbs.
+  for(let i=0;i<n;i++)for(const side of [-1,1]){
     const mask=side>0?track.features.left:track.features.right;if(!mask[i]&&!mask[(i+1)%n])continue;
-    const base=vertices.length/3,red=Math.floor(track.samples[i].distance/2.15)%2===0;
-    for(const k of [i,(i+1)%n])for(const u of [0,1]){
-      const s=track.samples[k],offset=side*(track.width/2+u*CURB_WIDTH*mask[k]),x=s.x+s.nx*offset,z=s.z+s.nz*offset;
-      vertices.push(x,surface(x,z)+bridgeHeight(track,k)+.020,z);colors.push(...(red?[.68,.13,.085]:[.87,.86,.76]));
+    const j=(i+1)%n,a=track.samples[i],b=track.samples[j],start=a.distance,end=j===0?track.length:b.distance,cuts=[start];
+    for(let d=(Math.floor(start/2.15)+1)*2.15;d<end-1e-6;d+=2.15)cuts.push(d);cuts.push(end);
+    const h0=bridgeHeight(track,i),h1=bridgeHeight(track,j);
+    for(let k=0;k<cuts.length-1;k++){
+      const points:Point[]=[],t0=(cuts[k]-start)/(end-start),t1=(cuts[k+1]-start)/(end-start);
+      for(const t of [t0,t1])for(const u of [0,1]){
+        const offset=side*(track.width/2+u*CURB_WIDTH*(mask[i]+(mask[j]-mask[i])*t));
+        points.push({x:a.x+(b.x-a.x)*t+(a.nx+(b.nx-a.nx)*t)*offset,z:a.z+(b.z-a.z)*t+(a.nz+(b.nz-a.nz)*t)*offset});
+      }
+      const [p,q,r,s]=points,spanX=b.x-a.x,spanZ=b.z-a.z,length2=spanX*spanX+spanZ*spanZ;
+      const height=(x:number,z:number)=>{const t=Math.max(0,Math.min(1,((x-a.x)*spanX+(z-a.z)*spanZ)/(length2||1)));return surface(x,z)+h0+(h1-h0)*t+TRACK_SURFACE_HEIGHT;};
+      const data=grid?drapeTriangles([[p,q,r],[q,s,r]],height,grid):{vertices:points.flatMap(p=>[p.x,height(p.x,p.z),p.z]),indices:side===1?[0,1,2,1,3,2]:[0,2,1,1,2,3]};
+      const base=vertices.length/3,red=Math.floor((cuts[k]+cuts[k+1])*.5/2.15)%2===0;
+      for(const value of data.vertices)vertices.push(value);
+      for(let f=0;f<data.indices.length;f+=3){
+        const [a,b,c]=data.indices.slice(f,f+3),v=data.vertices,area=(v[b*3+2]-v[a*3+2])*(v[c*3]-v[a*3])-(v[b*3]-v[a*3])*(v[c*3+2]-v[a*3+2]);
+        if(Math.abs(area)<1e-9)continue;if(area>0)indices.push(base+a,base+b,base+c);else indices.push(base+a,base+c,base+b);
+      }
+      for(let v=0;v<data.vertices.length;v+=3)colors.push(...(red?[.48,.012,.018]:[.78,.80,.77]));
+      for(let v=0;v<data.vertices.length;v+=3){
+        const x=data.vertices[v],z=data.vertices[v+2],t=Math.max(0,Math.min(1,((x-a.x)*spanX+(z-a.z)*spanZ)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t;
+        const lateral=((x-a.x-spanX*t)*nx+(z-a.z-spanZ*t)*nz)*side,localWidth=CURB_WIDTH*(mask[i]+(mask[j]-mask[i])*t);
+        kerbUvs.push(start+(end-start)*t,Math.max(0,Math.min(1,(lateral-track.width/2)/Math.max(.001,localWidth))));
+      }
     }
-    if(side===1)indices.push(base,base+1,base+2,base+1,base+3,base+2);else indices.push(base,base+2,base+1,base+1,base+2,base+3);
   }
-  return {vertices,indices,colors};
+  return {vertices,indices,colors,kerbUvs};
 }
 
 export function nearestOnTrack(track:TrackData,p:Point):{index:number;distance:number;signedDistance:number;sample:TrackSample} {

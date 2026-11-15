@@ -59,3 +59,8 @@ button,input,select,a,dialog,.session-card,.canvas-wrap,.library-block,.analysis
 .library-load-row #circuit-scale{width:100%}.panel-footer #auto-status{font-size:10px;color:#a6bbb4;padding:5px 0;margin:0}
 .viewport-top{justify-content:flex-end}.error-overlay{bottom:0}
 .pedal-assist-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0 2px;font:9px var(--mono);color:#a4b4b2}.brake-demand-key{display:flex;align-items:center;gap:5px;white-space:nowrap}.brake-demand-key:before{content:'';width:12px;border-top:1px dashed #cad2cd}.brake-demand-key small{color:#7f9495;font-size:8px}.pedal-assist-row #abs-status{font-weight:500;white-space:nowrap;font-size:9px;color:#78938c;border:1px solid #3d534b;padding:2px 4px}.pedal-assist-row #abs-status.active{color:#141a16;background:#e5c06b;border-color:#e5c06b}.pedal-heading>div{white-space:nowrap}#vehicle-source{font-size:9px;color:#b8c8c1}@media(max-width:700px){.brake-demand-key small{display:none}.pedal-assist-row{gap:4px;font-size:8px}.pedal-assist-row #abs-status{font-size:8px;padding:1px 3px}}
+
+/* Natural daylight stays visible behind the opaque timing panels. */
+.view-vignette,.is-driving .view-vignette{background:linear-gradient(180deg,#07111308,transparent 28%,transparent 78%,#00000018)}
+.asset-credits{color:inherit;font-size:9px;text-decoration:none;margin-left:12px;white-space:nowrap}.asset-credits:hover{text-decoration:underline}
+@media(max-width:700px){.asset-credits{font-size:8px;margin-left:6px}}

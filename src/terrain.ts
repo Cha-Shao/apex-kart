@@ -2,6 +2,7 @@ import type { Point } from './track';
 
 export interface TerrainData { resolution:number; originX:number; originZ:number; size:number; heights:number[] }
 export type BrushMode='raise'|'lower'|'smooth'|'flatten';
+const refinedFields=new WeakMap<TerrainField,{revision:number;field:TerrainField}>();
 export class TerrainField {
   readonly resolution:number;
   readonly originX:number;
@@ -17,6 +18,26 @@ export class TerrainField {
   get cellSize(){return this.size/(this.resolution-1);}
   static around(points:Point[]){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),minX=Math.min(...xs),maxX=Math.max(...xs),minZ=Math.min(...zs),maxZ=Math.max(...zs);const size=Math.max(500,Math.max(maxX-minX,maxZ-minZ)*1.35+150);return new TerrainField({resolution:129,size,originX:(minX+maxX-size)/2,originZ:(minZ+maxZ-size)/2,heights:new Array(129**2).fill(0)});}
   clone(){return new TerrainField(this.toJSON());}
+  /** Refine the editable source without changing its stored samples. Both the
+   * renderer and Cannon consume this same monotone-cubic heightfield. */
+  refined(){
+    const cached=refinedFields.get(this);if(cached?.revision===this.revision)return cached.field;
+    if(this.resolution>=257)return this;
+    const n=(this.resolution-1)*2+1,heights=new Array<number>(n*n),source=this.resolution;
+    const cubic=(a:number,b:number,c:number,d:number,t:number)=>{
+      const delta=c-b;if(Math.abs(delta)<1e-12)return b;
+      let m0=(c-a)*.5,m1=(d-b)*.5;if(m0*delta<=0)m0=0;if(m1*delta<=0)m1=0;
+      const limit=3*Math.abs(delta);m0=Math.sign(m0)*Math.min(Math.abs(m0),limit);m1=Math.sign(m1)*Math.min(Math.abs(m1),limit);
+      const t2=t*t,t3=t2*t;return Math.max(Math.min(b,c),Math.min(Math.max(b,c),(2*t3-3*t2+1)*b+(t3-2*t2+t)*m0+(-2*t3+3*t2)*c+(t3-t2)*m1));
+    };
+    const at=(x:number,z:number)=>this.heights[Math.max(0,Math.min(source-1,z))*source+Math.max(0,Math.min(source-1,x))];
+    for(let z=0;z<n;z++)for(let x=0;x<n;x++){
+      const fx=x*.5,fz=z*.5,ix=Math.floor(fx),iz=Math.floor(fz),rows=[];
+      for(let j=-1;j<=2;j++)rows.push(cubic(at(ix-1,iz+j),at(ix,iz+j),at(ix+1,iz+j),at(ix+2,iz+j),fx-ix));
+      heights[z*n+x]=cubic(rows[0],rows[1],rows[2],rows[3],fz-iz);
+    }
+    const field=new TerrainField({resolution:n,size:this.size,originX:this.originX,originZ:this.originZ,heights});refinedFields.set(this,{revision:this.revision,field});return field;
+  }
   toJSON():TerrainData{return {resolution:this.resolution,size:this.size,originX:this.originX,originZ:this.originZ,heights:Array.from(this.heights,h=>Math.round(h*1000)/1000)};}
   get min(){let min=0;for(const h of this.heights)min=Math.min(min,h);return min;}
   get max(){let max=0;for(const h of this.heights)max=Math.max(max,h);return max;}

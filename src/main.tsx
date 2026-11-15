@@ -53,7 +53,7 @@ $('#app').innerHTML=`
       <button type="button" data-control="brake" class="brake-pedal" aria-label="刹车，停稳后倒车" title="刹车 · 停稳后倒车"><i data-lucide="arrow-down" aria-hidden="true"></i></button>
       <button type="button" data-control="right" aria-label="右转" title="右转"><i data-lucide="arrow-right" aria-hidden="true"></i></button>
     </div>
-    <div class="viewport-footer"><div class="render-status"><span class="status-dot"></span><span id="render-status">3D 实时预览</span><span class="status-slash">/</span><span id="fps">60 FPS</span></div><div class="camera-switch" role="group" aria-label="视角"><button class="selected" data-camera="orbit" title="环绕视角">环绕</button><button data-camera="chase" title="跟随视角 (C)">跟随</button><button data-camera="top" title="俯视视角">俯视</button><button data-camera="cockpit" title="驾驶员视角">座舱</button><span></span><button id="fullscreen-button" aria-label="全屏" title="全屏"><i data-lucide="maximize-2"></i></button></div></div>
+    <div class="viewport-footer"><div class="render-status"><span class="status-dot"></span><span id="render-status">3D 实时预览</span><span class="status-slash">/</span><span id="fps">60 FPS</span><a class="asset-credits" href="/asset-credits.html" target="_blank" rel="noopener">CC0 素材 ↗</a></div><div class="camera-switch" role="group" aria-label="视角"><button class="selected" data-camera="orbit" title="环绕视角">环绕</button><button data-camera="chase" title="跟随视角 (C)">跟随</button><button data-camera="top" title="俯视视角">俯视</button><button data-camera="cockpit" title="驾驶员视角">座舱</button><span></span><button id="fullscreen-button" aria-label="全屏" title="全屏"><i data-lucide="maximize-2"></i></button></div></div>
     <div class="loading-screen" id="loading-screen"><div class="loading-mark">A<span>PEX</span></div><div class="loading-line"></div><p>正在准备你的赛道…</p></div>
   </section>
   <aside class="editor-panel" id="editor-panel">
@@ -335,7 +335,7 @@ function animate(now:number){
         if(!Number.isFinite(physics.body.position.y)||physics.body.position.y<physics.killY)resetKart();
       }
     }else if(!running){physics.input={throttle:0,brake:.4,steer:0,handbrake:false,reverse:false};physics.step(dt);}
-    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!countingDown,physics.telemetry.speed,physics.telemetry.kerbLeft,physics.telemetry.kerbRight,game.tyreSquealLeft,game.tyreSquealRight);
+    game.update(dt,running&&!paused);audio.update(physics.telemetry.rpm,physics.input.throttle,running&&!paused&&!countingDown,physics.telemetry.speed,physics.telemetry.kerbLeft,physics.telemetry.kerbRight,game.tyreSquealLeft,game.tyreSquealRight,physics.telemetry.grassLeft,physics.telemetry.grassRight);
     hudElapsed+=dt;if(hudElapsed>.05){if(running)updateHUD();hudElapsed=0;}
   }
   fpsAccum+=dt;fpsFrames++;if(fpsAccum>1){$('#fps').textContent=`${Math.round(fpsFrames/fpsAccum)} FPS`;fpsAccum=0;fpsFrames=0;}

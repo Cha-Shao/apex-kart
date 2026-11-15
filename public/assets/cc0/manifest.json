@@ -1,0 +1,123 @@
+{
+  "license": "CC0-1.0",
+  "assets": [
+    {
+      "id": "clean_asphalt",
+      "source": "https://polyhaven.com/a/clean_asphalt",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "clean_asphalt-color.webp",
+        "clean_asphalt-normal.webp",
+        "clean_asphalt-roughness.webp"
+      ],
+      "changes": "Clean fine-grained asphalt replaces the cracked source; matching 1K color, OpenGL normal and roughness maps converted to WebP. 2.1 metre scale with synchronized stochastic PBR sampling."
+    },
+    {
+      "id": "concrete_layers_02",
+      "source": "https://polyhaven.com/a/concrete_layers_02",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "concrete_layers_02-color.webp",
+        "concrete_layers_02-normal.webp",
+        "concrete_layers_02-roughness.webp"
+      ],
+      "changes": "1K source PBR maps converted to WebP; no baked lighting."
+    },
+    {
+      "id": "corrugated_iron",
+      "source": "https://polyhaven.com/a/corrugated_iron",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "corrugated_iron-color.webp",
+        "corrugated_iron-normal.webp",
+        "corrugated_iron-roughness.webp"
+      ],
+      "changes": "1K source PBR maps converted to WebP; no baked lighting."
+    },
+    {
+      "id": "fabric_pattern_07",
+      "source": "https://polyhaven.com/a/fabric_pattern_07",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "fabric_pattern_07-color.webp",
+        "fabric_pattern_07-normal.webp",
+        "fabric_pattern_07-roughness.webp"
+      ],
+      "changes": "1K source PBR maps converted to WebP; no baked lighting."
+    },
+    {
+      "id": "rubber_tiles",
+      "source": "https://polyhaven.com/a/rubber_tiles",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "rubber_tiles-color.webp",
+        "rubber_tiles-normal.webp",
+        "rubber_tiles-roughness.webp"
+      ],
+      "changes": "1K source PBR maps converted to WebP; no baked lighting."
+    },
+    {
+      "id": "Grass001",
+      "source": "https://ambientcg.com/view?id=Grass001",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://docs.ambientcg.com/license/",
+      "files": [
+        "grass-color.webp",
+        "grass-normal.webp",
+        "grass-roughness.webp"
+      ],
+      "changes": "1K JPG PBR maps converted to WebP; OpenGL normal orientation."
+    },
+    {
+      "id": "kloofendal_48d_partly_cloudy_puresky",
+      "source": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "sunny-sky.hdr"
+      ],
+      "changes": "2K linear HDR panorama used for sky and image based lighting."
+    },
+    {
+      "id": "tree_small_02",
+      "source": "https://polyhaven.com/a/tree_small_02",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "tree_small_02.glb",
+        "tree_small_02-far.glb"
+      ],
+      "changes": "Near model has 74273 triangles. Broadleaf keeps source leaf placement and UVs on alpha cards, with 1-in-16 enlarged leaves at distance; pine has a separately simplified far LOD and uses one supplied variant. 1K embedded WebP textures."
+    },
+    {
+      "id": "pine_sapling_small",
+      "source": "https://polyhaven.com/a/pine_sapling_small",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://polyhaven.com/license",
+      "files": [
+        "pine_sapling_small.glb",
+        "pine_sapling_small-far.glb"
+      ],
+      "changes": "Near model has 14613 triangles. Broadleaf keeps source leaf placement and UVs on alpha cards, with 1-in-16 enlarged leaves at distance; pine has a separately simplified far LOD and uses one supplied variant. 1K embedded WebP textures."
+    },
+    {
+      "id": "kenney-car-kit",
+      "source": "https://kenney.nl/assets/car-kit",
+      "license": "CC0-1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "files": [
+        "kart-oopi.glb",
+        "sedan-sports.glb",
+        "truck.glb",
+        "cone.glb",
+        "Kenney-License.txt"
+      ],
+      "changes": "Kart character removed to retain the game driver and cockpit. Palette split into paint, alloy, rubber and trim. Palette textures embedded for scenery vehicles."
+    }
+  ]
+}
