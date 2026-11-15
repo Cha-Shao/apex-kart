@@ -23,9 +23,10 @@
   flex: 0 0 18px;
 }
 
-.gamepad-status[data-state="connected"] {
-  border-color: #56663d;
-  color: #b8d77c;
+#gamepad-status.gamepad-status[data-state="connected"] {
+  border-color: #4b8a4b;
+  background: #253324;
+  color: #8ee08a;
 }
 
 .gamepad-status[data-state="unsupported"],
@@ -34,24 +35,279 @@
   color: #d8a65e;
 }
 
-.gamepad-help {
-  padding-top: 10px;
-  border-top: 1px solid #3b3c37;
-  color: #b8bab2;
+#help-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  scrollbar-color: #56584b transparent;
+}
+
+#help-dialog[data-help-view="gamepad"] {
+  max-width: 1040px;
+  background: #1c1e1b;
+  border-color: #57594d;
+}
+
+#help-dialog .dialog-head h2 {
+  margin-bottom: 20px;
+}
+
+.help-tabs {
+  display: flex;
+  gap: 25px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid #41433b;
+}
+
+.help-tabs button {
+  padding: 0 0 12px;
+  border-bottom: 2px solid transparent;
+  color: #a5aaa0;
   font-size: 13px;
-  line-height: 1.5;
 }
 
-.gamepad-help h3 {
-  margin: 0 0 5px;
-  color: #e0e1da;
-  font-size: 14px;
-  font-weight: 600;
+.help-tabs button[aria-selected="true"] {
+  border-bottom-color: #dcc779;
+  color: #eedda3;
 }
 
-.gamepad-help p {
+.help-tabs button:hover {
+  color: #f3e9c7;
+}
+
+.gamepad-guide-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gamepad-guide-heading h3 {
   margin: 0;
-  color: #a8aaa2;
+  color: #e4e5dc;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.gamepad-guide-heading > span {
+  color: #a4a89b;
+  font-size: 11px;
+}
+
+.gamepad-figure {
+  margin: 0 0 20px;
+}
+
+.gamepad-diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 4px 0 6px;
+}
+
+.pad-shell,
+.pad-hardware {
+  stroke: #e0e2d6;
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pad-body {
+  fill: #2a2d26;
+}
+
+.pad-shoulder,
+.pad-trigger {
+  fill: #33372e;
+}
+
+.pad-seam,
+.pad-grip {
+  fill: none;
+  stroke: #656a5a;
+  stroke-width: 1;
+}
+
+.pad-stick-well,
+.pad-dpad-well {
+  fill: #262922;
+  stroke: #646b59;
+  stroke-width: 1.2;
+}
+
+.pad-stick,
+.pad-dpad {
+  fill: #3b4034;
+}
+
+.pad-stick-inner {
+  fill: #30352b;
+  stroke: #8d957d;
+  stroke-width: 1.2;
+}
+
+.pad-dpad-detail {
+  fill: none;
+  stroke: #969e88;
+  stroke-width: 1;
+}
+
+.pad-face,
+.pad-menu-button,
+.pad-home {
+  fill: #22261f;
+}
+
+.pad-menu-icon,
+.pad-home-mark {
+  fill: none;
+  stroke-width: 1.3;
+}
+
+.pad-home {
+  stroke: #8b947c;
+  stroke-width: 1.2;
+}
+
+.pad-home-mark {
+  stroke: #d8c779;
+}
+
+.pad-button-letters {
+  fill: #e5e7dc;
+  font: 500 23px 'Bahnschrift', sans-serif;
+}
+
+.pad-button-letters .pad-trigger-letter {
+  font-size: 12px;
+}
+
+.pad-letter-y { fill: #e7d380; }
+.pad-letter-x { fill: #a7c6e2; }
+.pad-letter-b { fill: #e6a18c; }
+.pad-letter-a { fill: #b9d59c; }
+
+.pad-callout-lines {
+  fill: none;
+  stroke: #d8c779;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pad-callout-lines circle {
+  fill: #d8c779;
+  stroke: none;
+}
+
+.pad-callout-action {
+  fill: #f0eee2;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.pad-callout-key {
+  fill: #e1cd83;
+  font-size: 13px;
+}
+
+.pad-callout-detail {
+  fill: #abb19f;
+  font-size: 12px;
+}
+
+.gamepad-figure figcaption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 13px 0 0;
+  border-top: 1px solid #41433b;
+  color: #b6bcab;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.pad-connect-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: #d8c779;
+}
+
+.pad-handbrake-note {
+  margin-left: auto;
+  color: #a2a997;
+}
+
+.gamepad-diagram-mobile,
+.gamepad-mobile-controls {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  #help-dialog {
+    width: calc(100% - 24px);
+    padding: 20px;
+  }
+
+  .gamepad-guide-heading > span {
+    font-size: 10px;
+  }
+
+  .gamepad-diagram {
+    display: none;
+  }
+
+  .gamepad-diagram-mobile {
+    display: block;
+    width: 100%;
+    margin: 20px 0;
+  }
+
+  .gamepad-mobile-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    margin: 0 0 16px;
+  }
+
+  .gamepad-mobile-controls > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 0;
+    border-top: 1px solid #41433b;
+  }
+
+  .gamepad-mobile-controls .pad-control-steering {
+    grid-column: 1 / -1;
+  }
+
+  .gamepad-mobile-controls dt {
+    color: #e1cd83;
+    font-size: 11px;
+  }
+
+  .gamepad-mobile-controls dd {
+    margin: 0;
+    color: #f0eee2;
+    font-size: 13px;
+  }
+
+  .gamepad-mobile-controls small {
+    display: block;
+    margin-top: 3px;
+    color: #a2a997;
+    font-size: 10px;
+  }
+
+  .pad-handbrake-note {
+    width: 100%;
+    margin-left: 13px;
+  }
 }
 
 @media (max-width: 700px) {

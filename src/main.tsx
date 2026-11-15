@@ -1,14 +1,16 @@
 import './style.css';
 import './broadcast.css';
 import './gamepad.css';
+import './editor-cards.css';
 import {GamepadController} from './gamepad';
+import {gamepadGuide} from './gamepad-guide';
 import './reference-image.css';
 import {ReferenceImageLayer} from './reference-image';
 import {SectorTiming} from './timing';
 import {mountLapTimes} from './components/LapTimes';
 import {mountVehiclePicker} from './components/VehiclePicker';
 import {type VehicleId} from './vehicles';
-import { createIcons, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Flag, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Shield, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
+import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Flag, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Shield, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
 import { buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, PRESETS, type Point, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
 import { TrackEditor } from './editor';
 import { KartPhysics } from './physics';
@@ -20,7 +22,7 @@ import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
 import {circuitTerrain} from './preset-terrain';
 import {fantasyTerrain} from './fantasy-terrain';
 
-const iconSet={ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Flag,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Shield,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
+const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Flag,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Shield,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
 const icons=()=>createIcons({icons:iconSet,attrs:{'stroke-width':1.6}});
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const formatTime=(seconds:number)=>{if(!Number.isFinite(seconds))return '—:——.———';const m=Math.floor(seconds/60),s=Math.floor(seconds%60),cs=Math.floor(seconds%1*1000);return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(3,'0')}`;};
@@ -46,14 +48,23 @@ $('#app').innerHTML=`
     <div class="race-actions" id="race-actions" hidden><button id="pause-button" class="round-action" aria-label="暂停"><i data-lucide="pause"></i></button><button id="reset-button" class="round-action" title="复位车辆 (R)" aria-label="复位车辆"><i data-lucide="rotate-ccw"></i></button><button id="exit-button" class="exit-button"><i data-lucide="pencil"></i><span>返回工坊</span></button></div>
     <div class="pedal-panel" id="pedal-panel" hidden><div class="pedal-heading"><span>驾驶输入 <small>最近 10 秒</small></span><div><span class="throttle-key">油门 <b id="throttle-percent">0%</b></span><span class="brake-key">实际刹车 <b id="brake-percent">0%</b></span></div></div><div class="pedal-assist-row"><span class="brake-demand-key">踏板 <b id="brake-demand-percent">0%</b><small>虚线 · 阴影为削减量</small></span><b id="abs-status" role="status">ABS 待命</b></div><canvas id="pedal-chart" width="300" height="105" aria-label="最近十秒油门、刹车踏板虚线与ABS实际刹车实线，阴影显示刹车削减量"></canvas></div>
     <div class="controls-hint" id="controls-hint"><span><kbd>拖动</kbd> 旋转视角</span><span><kbd>滚轮</kbd> 缩放</span><span class="hint-extra"><i data-lucide="mouse-pointer-2"></i>探索你的赛道</span></div>
-    <div class="mobile-controls" id="mobile-controls" hidden><div><button data-control="left" aria-label="左转">◀</button><button data-control="right" aria-label="右转">▶</button></div><div><button data-control="brake" class="brake-pedal">刹车</button><button data-control="throttle" class="gas-pedal">油门</button></div></div>
+    <div class="mobile-controls" id="mobile-controls" role="group" aria-label="触屏方向键驾驶控制" hidden>
+      <button type="button" data-control="throttle" class="gas-pedal" aria-label="油门" title="油门"><i data-lucide="arrow-up" aria-hidden="true"></i></button>
+      <button type="button" data-control="left" aria-label="左转" title="左转"><i data-lucide="arrow-left" aria-hidden="true"></i></button>
+      <button type="button" data-control="brake" class="brake-pedal" aria-label="刹车，停稳后倒车" title="刹车 · 停稳后倒车"><i data-lucide="arrow-down" aria-hidden="true"></i></button>
+      <button type="button" data-control="right" aria-label="右转" title="右转"><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+    </div>
     <div class="viewport-footer"><div class="render-status"><span class="status-dot"></span><span id="render-status">3D 实时预览</span><span class="status-slash">/</span><span id="fps">60 FPS</span></div><div class="camera-switch" role="group" aria-label="视角"><button class="selected" data-camera="orbit" title="环绕视角">环绕</button><button data-camera="chase" title="跟随视角 (C)">跟随</button><button data-camera="top" title="俯视视角">俯视</button><button data-camera="cockpit" title="驾驶员视角">座舱</button><span></span><button id="fullscreen-button" aria-label="全屏" title="全屏"><i data-lucide="maximize-2"></i></button></div></div>
     <div class="loading-screen" id="loading-screen"><div class="loading-mark">A<span>PEX</span></div><div class="loading-line"></div><p>正在准备你的赛道…</p></div>
   </section>
   <aside class="editor-panel" id="editor-panel">
-    <div class="panel-heading"><div class="panel-eyebrow"><span class="live-dot"></span> TRACK BUILDER <span>01 — 03</span></div><div class="panel-title"><h2>好赛道，始于一笔。</h2><button class="icon-button" id="new-button" title="新建手绘赛道" aria-label="新建手绘赛道"><i data-lucide="pencil"></i></button></div><p>画出路线，我们来打磨每一个弯。</p></div>
     <div class="panel-scroll">
-      <div id="vehicle-picker"></div>
+      <section class="workshop-card garage-card" aria-label="车型与驾驶辅助">
+        <div id="vehicle-picker"></div>
+        <div class="assist-row"><label for="abs-toggle"><strong>ABS</strong><small>防抱死驾驶辅助</small></label><input class="switch" id="abs-toggle" type="checkbox" checked/></div>
+      </section>
+      <section class="workshop-card track-card" aria-label="赛道选择与编辑">
+        <div class="workshop-card-title"><h2>赛道与编辑</h2><button type="button" id="new-button" title="新建手绘赛道"><i data-lucide="pencil"></i>新建</button></div>
       <div class="library-block"><div class="section-label"><span>真实赛道库</span><span class="library-badge">2026 / DAYTONA</span></div><div class="library-select-row"><select id="circuit-select" aria-label="选择真实赛道"><option value="">选择 F1 赛道或戴托纳…</option>${(['current-2026','original-2026','bonus'] as const).map((status,i)=>`<optgroup label="${['2026 当前赛历','2026 原定布局（调整前）','耐力经典'][i]}">${CIRCUIT_LIBRARY.filter(c=>c.calendarStatus===status).map(c=>`<option value="${c.id}">${c.round?`${String(c.round).padStart(2,'0')} · `:''}${c.name}</option>`).join('')}</optgroup>`).join('')}</select></div><div class="library-load-row"><div id="circuit-scale" class="circuit-scale-tabs" role="tablist" aria-label="赛道尺寸"><button type="button" class="circuit-scale-tab" role="tab" data-scale="native" aria-selected="true" tabindex="0" aria-controls="library-info">原尺寸 · 1:1</button><button type="button" class="circuit-scale-tab" role="tab" data-scale="compact" aria-selected="false" tabindex="-1" aria-controls="library-info">卡丁车缩放版</button></div></div><p id="library-info">${CIRCUIT_LIBRARY.filter(c=>c.calendarStatus==='current-2026').length} 条现行 F1 布局 + 原定布局 + 戴托纳。<br>含 DEM 近似高程，载入后可用高度笔刷调整。</p><a class="library-credit" href="/circuit-credits.html" target="_blank" rel="noopener">赛历来源与数据许可 ↗</a></div>
       <div class="section-label preset-label"><span>从灵感出发</span><span>或直接在下方绘制 <i data-lucide="arrow-up-right"></i></span></div>
       <div class="presets">${PRESETS.map((p,i)=>`<button class="preset ${i===0?'selected':''}" data-preset="${p.id}">${miniSvg(p.points)}<span>${p.name}</span></button>`).join('')}</div>
@@ -69,15 +80,19 @@ $('#app').innerHTML=`
       <div class="toggle-row"><label for="curbs-toggle"><i data-lucide="flag"></i><span>弯道路肩<small>根据弯道曲率自动生成</small></span></label><input class="switch" type="checkbox" id="curbs-toggle" checked/></div>
       <div class="free-boundary"><i data-lucide="shield"></i><span>开放边界<small>已移除护栏与空气墙，可自由驶出赛道。</small></span></div>
       </div>
-      <div class="editor-section analysis-section"><div class="section-label"><span><b>03</b> 赛道分析</span><span class="analysis-badge"><span class="status-dot"></span>实时识别</span></div><div class="analysis-grid"><div><span>赛道全长</span><strong id="stat-length">— <small>m</small></strong></div><div><span>弯道数量</span><strong id="stat-corners">— <small>个</small></strong></div><div><span>急弯数量</span><strong id="stat-hairpins">— <small>个</small></strong></div><div><span>直道占比</span><strong id="stat-straights">— <small>%</small></strong></div></div></div>
       <div class="file-actions"><button id="export-button"><i data-lucide="arrow-down-to-line"></i>导出 JSON</button><span></span><button id="import-button"><i data-lucide="arrow-up-from-line"></i>导入赛道</button></div>
+      </section>
+      <section class="workshop-card analysis-card" aria-label="赛道分析">
+      <div class="editor-section analysis-section"><div class="section-label"><span><b>03</b> 赛道分析</span><span class="analysis-badge"><span class="status-dot"></span>实时识别</span></div><div class="analysis-grid"><div><span>赛道全长</span><strong id="stat-length">— <small>m</small></strong></div><div><span>弯道数量</span><strong id="stat-corners">— <small>个</small></strong></div><div><span>急弯数量</span><strong id="stat-hairpins">— <small>个</small></strong></div><div><span>直道占比</span><strong id="stat-straights">— <small>%</small></strong></div></div></div>
+      </section>
+
     </div>
-    <div class="panel-footer"><p id="auto-status"><span class="status-dot"></span>自动应用 · 修改后实时更新</p></div>
+    <div class="panel-footer"><button type="button" id="panel-drive-button" class="primary-drive-button"><span>试驾</span><i data-lucide="arrow-up-right"></i></button></div>
   </aside>
 </main>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file-input" accept="application/json,.json" hidden/>
-<dialog id="help-dialog"><div class="dialog-head"><div><span class="eyebrow">A QUICK PIT STOP</span><h2>准备好，向弯心出发。</h2></div><button class="icon-button close-help" aria-label="关闭说明"><i data-lucide="x"></i></button></div><div class="help-columns"><div><h3>驾驶控制</h3><p><kbd>W</kbd><kbd>↑</kbd><span>加速</span></p><p><kbd>S</kbd><kbd>↓</kbd><span>刹车 · 停稳后倒车</span></p><p><kbd>A</kbd><kbd>D</kbd><span>左 / 右转向</span></p><p><kbd>Space</kbd><span>手刹漂移</span></p><p><kbd>R</kbd><span>回起点并重计当前圈</span></p><p><kbd>C</kbd><span>切换驾驶视角</span></p><p><kbd>Esc</kbd><span>暂停 / 继续</span></p></div><div><h3>赛道工坊</h3><p class="help-text">选择画笔，在画布上一笔画出不交叉的环线。松手后自动闭合和平滑；选择控制点工具可以左键拖动、右键删点。可导入底图描线，用高度层绘制地形。</p><p class="help-text">浅青色表示直道，绿色表示缓弯，青柠色表示急弯。修改后自动同步到 3D 世界。</p><p class="help-text">保存会保留在当前浏览器；导出 JSON 可以备份或分享。手机和平板可用屏幕踏板驾驶。</p></div></div><div class="gamepad-help"><h3>手柄控制 · Xbox / PlayStation 标准映射</h3><p>连接后在手柄上按任意键识别，松开摇杆与扳机后即可驾驶。</p><p>左摇杆 / 十字键：转向 · RT / R2：油门 · LT / L2：刹车</p><p>A / ×：上车、继续或卡丁车手刹 · B / ○：低速倒车</p><p>Y / △：回起点 · X / □：切换视角 · Start / Options：开始或暂停 · Back / Share：返回工坊</p><p>支持模拟油门与刹车。方向盘、飞行摇杆等非标准映射暂不适用。</p></div><div class="physics-note"><i data-lucide="grip"></i><span>真实刚体碰撞 + 四轮射线悬挂，包含轮胎滑移、后轮驱动与空气阻力。属于可玩的物理原型，参数尚未经实车标定。</span></div><button class="generate-button close-help">知道了，去跑一圈 <i data-lucide="arrow-up-right"></i></button></dialog>
+<dialog id="help-dialog" data-help-view="gamepad" aria-labelledby="help-title"><div class="dialog-head"><div><span class="eyebrow">CONTROLS / 操作指南</span><h2 id="help-title">熟悉操作，即刻上场。</h2></div><button class="icon-button close-help" aria-label="关闭说明"><i data-lucide="x"></i></button></div><div class="help-tabs" role="tablist" aria-label="操作说明分类"><button type="button" id="help-gamepad-tab" role="tab" data-help-tab="gamepad" aria-selected="true" aria-controls="help-gamepad-panel">手柄控制</button><button type="button" id="help-keyboard-tab" role="tab" data-help-tab="keyboard" aria-selected="false" aria-controls="help-keyboard-panel" tabindex="-1">键盘与工坊</button></div><div id="help-gamepad-panel" role="tabpanel" aria-labelledby="help-gamepad-tab">${gamepadGuide}</div><div id="help-keyboard-panel" role="tabpanel" aria-labelledby="help-keyboard-tab" hidden><div class="help-columns"><div><h3>驾驶控制</h3><p><kbd>W</kbd><kbd>↑</kbd><span>加速</span></p><p><kbd>S</kbd><kbd>↓</kbd><span>刹车 · 停稳后倒车</span></p><p><kbd>A</kbd><kbd>D</kbd><span>左 / 右转向</span></p><p><kbd>Space</kbd><span>手刹漂移</span></p><p><kbd>R</kbd><span>回起点并重计当前圈</span></p><p><kbd>C</kbd><span>切换驾驶视角</span></p><p><kbd>Esc</kbd><span>暂停 / 继续</span></p></div><div><h3>赛道工坊</h3><p class="help-text">选择画笔，在画布上一笔画出不交叉的环线。松手后自动闭合和平滑；选择控制点工具可以左键拖动、右键删点。可导入底图描线，用高度层绘制地形。</p><p class="help-text">浅青色表示直道，绿色表示缓弯，青柠色表示急弯。修改后自动同步到 3D 世界。</p><p class="help-text">保存会保留在当前浏览器；导出 JSON 可以备份或分享。手机和平板可用屏幕踏板驾驶。</p></div></div><div class="physics-note"><i data-lucide="grip"></i><span>真实刚体碰撞 + 四轮射线悬挂，包含轮胎滑移、后轮驱动与空气阻力。属于可玩的物理原型，参数尚未经实车标定。</span></div></div><button class="generate-button close-help">知道了，去跑一圈 <i data-lucide="arrow-up-right"></i></button></dialog>
 <div class="error-overlay" id="error-overlay" hidden><h2>3D 场景暂时无法启动</h2><p id="error-message"></p><button onclick="location.reload()">重新加载</button></div>
 `;
 icons();
@@ -100,6 +115,8 @@ let circuitScale:'native'|'compact'=appliedRoute?.scale??'native';
 let previewTimer:number|undefined;
 let editorSignature='';
 const physics=new KartPhysics();
+physics.vehicle.absEnabled=safeStorage.get('apex-abs-v1')!=='off';
+$<HTMLInputElement>('#abs-toggle').checked=physics.vehicle.absEnabled;
 const savedVehicle=safeStorage.get('apex-vehicle-v1');if(savedVehicle==='rb20')physics.setVehicle('rb20');
 const audio=new EngineAudio();
 audio.setVehicle(physics.profile.id);
@@ -236,6 +253,8 @@ $('#circuit-scale').addEventListener('keydown',event=>{
 syncCircuitScale();
 $('#circuit-select').title=F1_CALENDAR_NOTE;
 if(appliedRoute){$<HTMLSelectElement>('#circuit-select').value=appliedRoute.circuitId;circuitScale=appliedRoute.scale;syncCircuitScale();}
+$('#panel-drive-button').addEventListener('click',startDrive);
+$('#abs-toggle').addEventListener('change',()=>{const enabled=$<HTMLInputElement>('#abs-toggle').checked;physics.vehicle.absEnabled=enabled;physics.vehicle.resetABS();physics.telemetry.absActive=false;safeStorage.set('apex-abs-v1',enabled?'on':'off');});
 $('#start-button').addEventListener('click',startDrive);$('#drive-tab').addEventListener('click',()=>running?setEditorVisible(false):startDrive());$('#editor-tab').addEventListener('click',()=>{if(running)exitDrive();else setEditorVisible(true);});$('#exit-button').addEventListener('click',exitDrive);$('#pause-button').addEventListener('click',pause);$('#reset-button').addEventListener('click',resetKart);
 document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(b=>b.addEventListener('click',()=>setCamera(b.dataset.camera as CameraMode)));
 document.querySelectorAll<HTMLButtonElement>('[data-color]').forEach(b=>b.addEventListener('click',()=>{game?.setColor(b.dataset.color!);document.querySelectorAll('[data-color]').forEach(x=>x.classList.toggle('selected',x===b));}));
@@ -251,7 +270,20 @@ $('#save-button').addEventListener('click',()=>{if(!draftTrack){toast('请先画
 $('#export-button').addEventListener('click',()=>{if(!draftTrack){toast('请先画出一条有效赛道。');return;}const blob=new Blob([JSON.stringify(trackFile(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`apex-${draftName}.json`;a.click();window.setTimeout(()=>URL.revokeObjectURL(url),2000);toast('赛道 JSON 已导出。');});
 $('#import-button').addEventListener('click',()=>$<HTMLInputElement>('#file-input').click());
 $('#file-input').addEventListener('change',async e=>{const input=e.target as HTMLInputElement,file=input.files?.[0];if(!file)return;try{if(file.size>3e6)throw new Error('文件太大，请使用小于 3 MB 的赛道 JSON。');const data=parseTrackFile(await file.text()),terrain=await importedTerrain(data);settings={...data.settings};draftName=data.name;draftRoute=data.route;editor.options=data.route?{preserveLayout:true,allowCrossings:true}:{};editor.settings={...settings};syncSettings();editor.setPoints(data.points);terrainPainter!.setField(terrain);updateTerrainControls();document.querySelectorAll('[data-preset]').forEach(x=>x.classList.remove('selected'));dirty=true;applyDraft();toast('赛道已导入并应用。');}catch(error){toast((error as Error).message);}input.value='';});
-$('#help-button').addEventListener('click',()=>{if(running&&!paused)pause();$<HTMLDialogElement>('#help-dialog').showModal();});document.querySelectorAll('.close-help').forEach(b=>b.addEventListener('click',()=>$<HTMLDialogElement>('#help-dialog').close()));$<HTMLDialogElement>('#help-dialog').addEventListener('click',e=>{if(e.target===$('#help-dialog'))$<HTMLDialogElement>('#help-dialog').close();});
+type HelpView='gamepad'|'keyboard';
+function selectHelpView(view:HelpView){
+  const dialog=$<HTMLDialogElement>('#help-dialog');dialog.dataset.helpView=view;
+  document.querySelectorAll<HTMLButtonElement>('[data-help-tab]').forEach(tab=>{const selected=tab.dataset.helpTab===view;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;});
+  $('#help-gamepad-panel').hidden=view!=='gamepad';$('#help-keyboard-panel').hidden=view!=='keyboard';dialog.scrollTop=0;
+}
+function openHelp(view:HelpView){
+  if(running&&!paused)pause();selectHelpView(view);$<HTMLDialogElement>('#help-dialog').showModal();
+}
+document.querySelectorAll<HTMLButtonElement>('[data-help-tab]').forEach(tab=>{
+  tab.addEventListener('click',()=>selectHelpView(tab.dataset.helpTab as HelpView));
+  tab.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const view=e.key==='Home'?'gamepad':e.key==='End'?'keyboard':tab.dataset.helpTab==='gamepad'?'keyboard':'gamepad';selectHelpView(view);$<HTMLButtonElement>('#help-'+view+'-tab').focus();});
+});
+$('#help-button').addEventListener('click',()=>openHelp('keyboard'));document.querySelectorAll('.close-help').forEach(b=>b.addEventListener('click',()=>$<HTMLDialogElement>('#help-dialog').close()));$<HTMLDialogElement>('#help-dialog').addEventListener('click',e=>{if(e.target===$('#help-dialog'))$<HTMLDialogElement>('#help-dialog').close();});
 $('#fullscreen-button').addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('.viewport').requestFullscreen();}catch{toast('当前浏览器不支持全屏，可以缩放页面查看。');}});
 window.addEventListener('keydown',e=>{
   const target=e.target as HTMLElement;if(target.matches('input,textarea,select'))return;
@@ -271,7 +303,7 @@ function updateLap(dt:number){
  if(complete){physics.clearTrackLimits();const lap=timing.history[0];if(!lap.invalid&&lap.time<bestTime){bestTime=lap.time;safeStorage.set(bestKey(),String(bestTime));toast('新最佳圈速 '+formatTime(bestTime));}}
  document.querySelectorAll<HTMLElement>('[data-sector]').forEach((bar,i)=>{bar.className='sector-bar '+(i<timing.sector?timing.colors[i]:i===timing.sector?'active':'pending');bar.querySelector<HTMLElement>('i')!.style.width=Math.max(0,Math.min(1,progress*3-i))*100+'%';bar.querySelector('small')!.textContent=(timing.splits[i]??(i===timing.sector?timing.time-timing.start:0)).toFixed(3).padStart(6,'0');});
 }
-function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
+function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=!physics.vehicle.absEnabled?'ABS 关闭':t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',physics.vehicle.absEnabled&&t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
 function cycleCamera(){const modes:CameraMode[]=['chase','top','cockpit','orbit'];setCamera(modes[(modes.indexOf(game?.mode||'chase')+1)%modes.length]);}
 function pollController(){
   controller.poll();
@@ -292,7 +324,7 @@ function pollController(){
   if(controller.reset)resetKart();
   if(controller.view)cycleCamera();
 }
-$('#gamepad-status').addEventListener('click',()=>$('#help-button').click());
+$('#gamepad-status').addEventListener('click',()=>openHelp('gamepad'));
 function animate(now:number){
   const dt=Math.min((now-lastTime)/1000,.06);lastTime=now;
   if(game){

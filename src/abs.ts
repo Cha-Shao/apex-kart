@@ -5,6 +5,8 @@ import * as CANNON from 'cannon-es';
  * from deltaRotation, since RaycastVehicle forcibly zeros it whenever braking.
  */
 export class AssistedVehicle extends CANNON.RaycastVehicle {
+  absEnabled=true;
+  frontBrakeBias=.58;
   serviceImpulse=0;
   demand=0;
   handbrake=false;
@@ -25,6 +27,13 @@ export class AssistedVehicle extends CANNON.RaycastVehicle {
     // Match friction capacity to the normal impulse actually applied by Cannon.
     let load=0;
     for(const wheel of wheels){wheel.suspensionForce=Math.min(wheel.maxSuspensionForce,wheel.suspensionForce);if(wheel.isInContact)load+=wheel.suspensionForce;}
+    if(!this.absEnabled){
+      // Driver pressure passes straight through. Wheel locking and the tyre
+      // friction solve remain Cannon's responsibility; no ABS pressure release.
+      this.pressure.fill(1);this.absActive=false;this.appliedBrake=this.demand;
+      for(let i=0;i<wheels.length;i++)wheels[i].brake=this.handbrake&&i>=2?6:this.serviceImpulse*(i<2?this.frontBrakeBias:1-this.frontBrakeBias)*.5;
+      super.updateFriction(dt);return;
+    }
     let applied=0;this.absActive=false;
     for(let i=0;i<wheels.length;i++){
       const wheel=wheels[i],ground=wheel.raycastResult.body;
@@ -58,6 +67,7 @@ export class AssistedVehicle extends CANNON.RaycastVehicle {
   updateVehicle(dt:number){
     this.wheelInfos.forEach((wheel,i)=>this.rotations[i]=wheel.rotation);
     super.updateVehicle(dt);
+    if(!this.absEnabled)return;
     // Preserve rolling visuals during ABS; base Cannon otherwise locks every
     // coasting/braking wheel regardless of its actual friction demand.
     this.wheelInfos.forEach((wheel,i)=>{

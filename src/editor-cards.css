@@ -1,0 +1,192 @@
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-panel > .panel-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.editor-panel .workshop-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #41423c;
+  border-radius: 0;
+  color: #e4e5df;
+}
+
+.editor-panel .garage-card {
+  background: #222320;
+}
+
+.editor-panel .track-card {
+  background: #272824;
+}
+
+.editor-panel .analysis-card {
+  background: #20221f;
+}
+
+.editor-panel .workshop-card > :first-child {
+  margin-top: 0;
+}
+
+.editor-panel .workshop-card > :last-child {
+  margin-bottom: 0;
+}
+
+.editor-panel .vehicle-picker {
+  margin-bottom: 0;
+}
+
+.workshop-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.workshop-card-title h2 {
+  margin: 0;
+  color: #e7e8e2;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.workshop-card-title #new-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #57594f;
+  border-radius: 0;
+  background: #30312c;
+  color: #dfe0d8;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assist-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 0 0;
+  border-top: 1px solid #41423c;
+}
+
+.assist-row label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: #e2e3dc;
+}
+
+.assist-row label strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assist-row label small {
+  color: #999b93;
+  font-size: 11px;
+}
+
+.assist-row input.switch {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 36px;
+  margin: 0;
+  border: 1px solid #66675f;
+  border-radius: 10px;
+  background: #393a36;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.assist-row input.switch::after { content: none; }
+
+.assist-row input.switch::before {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 0;
+  background: #c2c3bc;
+  content: "";
+  transition: transform 120ms ease;
+}
+
+.assist-row input.switch:checked {
+  border-color: #9caa50;
+  background: var(--lime, #b5c957);
+}
+
+.assist-row input.switch:checked::before {
+  background: #20211b;
+  transform: translateX(16px);
+}
+
+.assist-row input.switch:focus-visible,
+.workshop-card-title #new-button:focus-visible,
+.primary-drive-button:focus-visible {
+  outline: 2px solid var(--lime, #b5c957);
+  outline-offset: 2px;
+}
+
+.editor-panel > .panel-footer {
+  flex: 0 0 auto;
+  padding: 12px 14px 14px;
+  border-top: 1px solid #3c3d38;
+  background: #1d1e1c;
+}
+
+.editor-panel .primary-drive-button {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border: 1px solid var(--lime, #b5c957);
+  border-radius: 0;
+  background: var(--lime, #b5c957);
+  color: #202119;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editor-panel .primary-drive-button > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+}
+
+@media (max-width: 700px) {
+  .editor-panel > .panel-scroll {
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .editor-panel .workshop-card {
+    padding: 12px;
+  }
+
+  .editor-panel > .panel-footer {
+    padding: 9px 10px 10px;
+  }
+}

@@ -17,18 +17,18 @@ export class TyreSqueal {
   noise(){this.seed=(Math.imul(this.seed,1664525)+1013904223)|0;return (this.seed>>>0)/2147483648-1;}
   set({speed=0,squealLeft=0,squealRight=0,running=false,enabled=false}={}){
     this.speed=Math.max(0,speed);this.slipL=Math.max(0,Math.min(1,squealLeft));this.slipR=Math.max(0,Math.min(1,squealRight));
-    const active=running&&enabled&&this.speed>12,volume=.10+.15*Math.min(1,Math.max(0,(this.speed-12)/100));
+    const active=running&&enabled&&this.speed>12,volume=.15+.22*Math.min(1,Math.max(0,(this.speed-12)/100));
     this.targetL=active?this.slipL*volume:0;this.targetR=active?this.slipR*volume:0;
   }
   mix(left,right){
     const sr=this.sampleRate,count=left.length;
     if(this.targetL===0&&this.targetR===0&&this.gainL<1e-6&&this.gainR<1e-6)return;
-    const attack=1-Math.exp(-1/(sr*.035)),release=1-Math.exp(-1/(sr*.12));
+    const attack=1-Math.exp(-1/(sr*.018)),release=1-Math.exp(-1/(sr*.12));
     const speed=Math.min(1,this.speed/180),slip=Math.max(this.slipL,this.slipR),shift=1+this.jitter*.035;
-    const fundamental=(480+110*slip+45*speed)*shift,q=2.4+slip*2.8;
-    this.bandsL[0].tune(sr,fundamental,q);this.bandsL[1].tune(sr,fundamental*1.83,q*.75);this.bandsL[2].tune(sr,fundamental*3.17,1.8);
-    this.bandsR[0].tune(sr,fundamental*1.025,q);this.bandsR[1].tune(sr,fundamental*1.79,q*.8);this.bandsR[2].tune(sr,fundamental*3.09,1.8);
-    const low=1-Math.exp(-2*Math.PI*110/sr),high=1-Math.exp(-2*Math.PI*3200/sr),slow=1-Math.exp(-1/(sr*.025));
+    const fundamental=(1250+350*slip+100*speed)*shift,q=6+slip*8;
+    this.bandsL[0].tune(sr,fundamental,q);this.bandsL[1].tune(sr,fundamental*1.43,q*.8);this.bandsL[2].tune(sr,fundamental*2.08,3.5);
+    this.bandsR[0].tune(sr,fundamental*1.025,q);this.bandsR[1].tune(sr,fundamental*1.39,q*.85);this.bandsR[2].tune(sr,fundamental*2.02,3.5);
+    const low=1-Math.exp(-2*Math.PI*110/sr),high=1-Math.exp(-2*Math.PI*4800/sr),slow=1-Math.exp(-1/(sr*.025));
     for(let i=0;i<count;i++){
       this.gainL+=(this.targetL-this.gainL)*(this.targetL>this.gainL?attack:release);
       this.gainR+=(this.targetR-this.gainR)*(this.targetR>this.gainR?attack:release);
@@ -38,11 +38,11 @@ export class TyreSqueal {
       this.lowL+=(noiseL-this.lowL)*low;this.lowR+=(noiseR-this.lowR)*low;
       this.highL+=(noiseL-this.lowL-this.highL)*high;this.highR+=(noiseR-this.lowR-this.highR)*high;
       const exciterL=this.highL,exciterR=this.highR;
-      const rubL=this.bandsL[0].sample(exciterL)*2.5+this.bandsL[1].sample(exciterL)*1.6+this.bandsL[2].sample(exciterL)*.65;
-      const rubR=this.bandsR[0].sample(exciterR)*2.5+this.bandsR[1].sample(exciterR)*1.6+this.bandsR[2].sample(exciterR)*.65;
+      const rubL=this.bandsL[0].sample(exciterL)*5.5+this.bandsL[1].sample(exciterL)*3.2+this.bandsL[2].sample(exciterL)*.65;
+      const rubR=this.bandsR[0].sample(exciterR)*5.5+this.bandsR[1].sample(exciterR)*3.2+this.bandsR[2].sample(exciterR)*.65;
       const modulation=.8+this.grain*.25;
-      const l=Math.tanh((rubL+exciterL*.14+this.lowL*.5)*1.25)*this.gainL*modulation;
-      const r=Math.tanh((rubR+exciterR*.14+this.lowR*.5)*1.25)*this.gainR*modulation;
+      const l=Math.tanh((rubL+exciterL*.08+this.lowL*.12)*1.25)*this.gainL*modulation;
+      const r=Math.tanh((rubR+exciterR*.08+this.lowR*.12)*1.25)*this.gainR*modulation;
       left[i]=Math.max(-1,Math.min(1,left[i]+l+r*.18));
       if(right)right[i]=Math.max(-1,Math.min(1,right[i]+r+l*.18));
     }

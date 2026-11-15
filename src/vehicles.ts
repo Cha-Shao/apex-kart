@@ -4,7 +4,7 @@ export interface VehicleProfile {
  id:VehicleId;name:string;mass:number;width:number;length:number;number:string;
  wheelRadius:number;frontTyreWidth:number;rearTyreWidth:number;frontHalfTrack:number;rearHalfTrack:number;frontZ:number;rearZ:number;wheelbase:number;
  connectionY:number;visualOffset:number;suspensionRestLength:number;suspensionStiffness:number;suspensionTravel:number;rideHeight:number;
- chassisHalf:[number,number,number];chassisOffset:number;
+ chassisHalf:[number,number,number];chassisOffset:number;chassisBevel?:[length:number,lift:number];
  driveForce:number;powerWatts:number;topSpeed:number;drag:number;rollingResistance:number;downforce:number;grip:number;brakeG:number;
  idleRPM:number;maxRPM:number;steeringRatio:number;cockpitEye:[number,number,number];cockpitGaze:[number,number,number];cockpitFov:number;chase:[number,number,number];
 }
@@ -18,8 +18,10 @@ export const VEHICLES:Record<VehicleId,VehicleProfile>={
  // Dimensions, aero coefficients and tyre/suspension tuning are game approximations.
  rb20:{id:'rb20',name:'RED BULL RB20',mass:798,width:2,length:5.6,number:'01',
  wheelRadius:.36,frontTyreWidth:.305,rearTyreWidth:.405,frontHalfTrack:.84,rearHalfTrack:.79,frontZ:-1.83,rearZ:1.77,wheelbase:3.6,
- connectionY:.13,visualOffset:-.10,suspensionRestLength:.08,suspensionStiffness:180,suspensionTravel:.06,rideHeight:.36+.08-9.81/(4*180)-.13,
- chassisHalf:[.43,.12,1.83],chassisOffset:-.08,
+ // Leave compression reserve for aero load and uphill transitions. The rigid
+ // floor stays between the axles and rises at both ends instead of digging in.
+ connectionY:.13,visualOffset:-.10,suspensionRestLength:.12,suspensionStiffness:220,suspensionTravel:.10,rideHeight:.36+.12-9.81/(4*220)-.13,
+ chassisHalf:[.43,.12,1.72],chassisOffset:-.02,chassisBevel:[.62,.18],
  driveForce:17000,powerWatts:(900+160)*745.7*.91,topSpeed:105,drag:.86,rollingResistance:115,downforce:3.2,grip:1.90,brakeG:2.4,
  idleRPM:3500,maxRPM:15000,steeringRatio:2.25,cockpitEye:[0,.64,.48],cockpitGaze:[0,.64-12*.115,.48-12],cockpitFov:80,chase:[0,3.1,8.4]},
 };
