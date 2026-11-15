@@ -10,7 +10,7 @@ import {SectorTiming} from './timing';
 import {mountLapTimes} from './components/LapTimes';
 import {mountVehiclePicker} from './components/VehiclePicker';
 import {type VehicleId} from './vehicles';
-import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Flag, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
+import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
 import { buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
 import { TrackEditor } from './editor';
 import { KartPhysics } from './physics';
@@ -21,7 +21,7 @@ import { PedalHistory } from './telemetry';
 import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
 import {circuitTerrain} from './preset-terrain';
 
-const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Flag,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
+const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
 const icons=()=>createIcons({icons:iconSet,attrs:{'stroke-width':1.6}});
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const formatTime=(seconds:number)=>{if(!Number.isFinite(seconds))return '—:——.———';const m=Math.floor(seconds/60),s=Math.floor(seconds%60),cs=Math.floor(seconds%1*1000);return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(3,'0')}`;};
@@ -74,7 +74,6 @@ $('#app').innerHTML=`
       <div class="editor-section settings-section"><div class="section-label"><span><b>02</b> 赛道设定</span><i data-lucide="settings-2"></i></div>
       <label class="range-label" for="width-range"><span>赛道宽度</span><output id="width-output">10 <small>m</small></output></label><input id="width-range" type="range" min="6" max="18" step="1" value="10"/><div class="range-extents"><span>窄 · 技术型</span><span>宽 · 高速型</span></div>
       <label class="range-label smooth-label" for="smooth-range"><span>曲线平滑度</span><output id="smooth-output">60<small>%</small></output></label><input id="smooth-range" type="range" min="0" max="100" step="5" value="60"/>
-      <div class="toggle-row"><label for="curbs-toggle"><i data-lucide="flag"></i><span>弯道路肩<small>根据弯道曲率自动生成</small></span></label><input class="switch" type="checkbox" id="curbs-toggle" checked/></div>
       </div>
       <div class="file-actions"><button id="export-button"><i data-lucide="arrow-down-to-line"></i>导出 JSON</button><span></span><button id="import-button"><i data-lucide="arrow-up-from-line"></i>导入赛道</button></div>
       </section>
@@ -145,7 +144,7 @@ function selectVehicle(id:VehicleId){
 
 function setStatus(message:string,error=false){$('#editor-status').textContent=message;$('#editor-status').classList.toggle('error',error);}
 function updateStats(track:TrackData|null){for(const [id,value,unit] of [['length',track?Math.round(track.length):'—','m'],['corners',track?.corners??'—','个'],['hairpins',track?.hairpins??'—','个'],['straights',track?.straightPercent??'—','%']] as const)$(`#stat-${id}`).innerHTML=`${value} <small>${unit}</small>`;}
-function syncSettings(){const w=$<HTMLInputElement>('#width-range'),s=$<HTMLInputElement>('#smooth-range');w.value=String(settings.width);s.value=String(settings.smoothness);w.style.setProperty('--progress',`${(settings.width-6)/12*100}%`);s.style.setProperty('--progress',`${settings.smoothness}%`);$('#width-output').innerHTML=`${settings.width} <small>m</small>`;$('#smooth-output').innerHTML=`${settings.smoothness}<small>%</small>`;$<HTMLInputElement>('#curbs-toggle').checked=settings.curbs;}
+function syncSettings(){const w=$<HTMLInputElement>('#width-range'),s=$<HTMLInputElement>('#smooth-range');w.value=String(settings.width);s.value=String(settings.smoothness);w.style.setProperty('--progress',`${(settings.width-6)/12*100}%`);s.style.setProperty('--progress',`${settings.smoothness}%`);$('#width-output').innerHTML=`${settings.width} <small>m</small>`;$('#smooth-output').innerHTML=`${settings.smoothness}<small>%</small>`;}
 function scheduleDraft(){
   if(!game||running||loadingElevation||!draftTrack||previewTimer!==undefined)return;
   previewTimer=window.setTimeout(()=>{previewTimer=undefined;if(dirty&&!running&&!loadingElevation&&draftTrack)applyDraft(true);},180);
@@ -209,7 +208,6 @@ $('#new-button').addEventListener('click',()=>{$<HTMLSelectElement>('#circuit-se
 $('#clear-button').addEventListener('click',()=>$('#new-button').click());$('#undo-button').addEventListener('click',()=>editor.undo());
 $('#width-range').addEventListener('input',e=>{settings.width=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
 $('#smooth-range').addEventListener('input',e=>{settings.smoothness=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
-$('#curbs-toggle').addEventListener('change',e=>{settings.curbs=(e.target as HTMLInputElement).checked;editor.updateSettings(settings);});
 function updateTerrainControls(){if(!terrainPainter)return;terrainPainter.radius=terrainPainter.field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);$('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;$('#height-range').textContent=`${terrainPainter.field.min.toFixed(1)} — ${terrainPainter.field.max.toFixed(1)} m`;}
 document.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach(b=>b.addEventListener('click',()=>{const height=b.dataset.layer==='height';terrainPainter!.setActive(height);$('#terrain-tools').hidden=!height;document.querySelectorAll('[data-layer]').forEach(x=>x.classList.toggle('selected',x===b));$('#layer-badge').textContent=height?'羽化高度笔刷':'自动平滑';}));
 document.querySelectorAll<HTMLButtonElement>('[data-brush]').forEach(b=>b.addEventListener('click',()=>{terrainPainter!.mode=b.dataset.brush as BrushMode;document.querySelectorAll('[data-brush]').forEach(x=>x.classList.toggle('selected',x===b));}));

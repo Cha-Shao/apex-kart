@@ -6,6 +6,7 @@ import { makeRB20 } from './rb20';
 import { KartPhysics } from './physics';
 import { bridgeHeight, curbGeometry, runoffGeometry, CURB_WIDTH, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
+import { TyreSmoke } from './tyre-smoke';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -35,6 +36,7 @@ export class GameScene {
   private skidCount=0;
   private skidCursor=0;
   private skidMarks:THREE.Mesh;
+  private tyreSmoke=new TyreSmoke();
   private previousSkid:({center:THREE.Vector3;left:THREE.Vector3;right:THREE.Vector3}|null)[]=[null,null];
   private time=0;
   private floor:THREE.Mesh;
@@ -56,11 +58,13 @@ export class GameScene {
     this.scene.add(this.landscape,this.circuit,this.scenery,this.kart.root,...this.kart.wheelMeshes);
     const skidGeometry=new THREE.BufferGeometry();skidGeometry.setAttribute('position',new THREE.BufferAttribute(this.skidPositions,3).setUsage(THREE.DynamicDrawUsage));skidGeometry.setDrawRange(0,0);
     this.skidMarks=new THREE.Mesh(skidGeometry,new THREE.MeshBasicMaterial({color:0x101512,transparent:true,opacity:.65,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));this.skidMarks.frustumCulled=false;this.scene.add(this.skidMarks);
+    this.scene.add(this.tyreSmoke.mesh);
     this.camera.position.set(260,290,340);this.orbit=new OrbitControls(this.camera,this.renderer.domElement);this.orbit.enableDamping=true;this.orbit.dampingFactor=.065;this.orbit.maxPolarAngle=Math.PI/2-.08;this.orbit.minDistance=5;this.orbit.maxDistance=100000;this.orbit.target.set(0,0,-8);
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
   }
   resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.track&&this.mode==='orbit')this.frameTrack();}
   setVehicle(){
+    this.tyreSmoke.clear();this.slipDuration=[0,0];
     for(const group of [this.kart.root,...this.kart.wheelMeshes]){this.scene.remove(group);this.clearGroup(group);}
     this.kart=this.physics.profile.id==='rb20'?makeRB20():makeKart();this.scene.add(this.kart.root,...this.kart.wheelMeshes);
     this.skidCount=0;this.skidCursor=0;this.skidMarks.geometry.setDrawRange(0,0);this.previousSkid=[null,null];this.setCamera(this.mode);this.renderer.shadowMap.needsUpdate=true;
@@ -85,7 +89,8 @@ export class GameScene {
   private sign(text:string,w:number,h:number,bg='#1c3031',fg='#d1ef70'){
     const c=document.createElement('canvas');c.width=1024;c.height=192;const ctx=c.getContext('2d')!;ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='italic 900 116px Arial';ctx.fillText(text,c.width/2,c.height*.53);const map=new THREE.CanvasTexture(c);map.colorSpace=THREE.SRGBColorSpace;return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map}));
   }
-  setTrack(track:TrackData,settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
+  setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
+    this.tyreSmoke.clear();this.slipDuration=[0,0];
     this.track=track;this.terrain=terrain.clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
@@ -93,16 +98,10 @@ export class GameScene {
     this.ribbon(track,0,track.width,.018,0x414b4b);
     for(const side of [-1,1]){
       this.ribbon(track,side*(half-.24),.13,.026,0xe5e8d7);
-      if(settings.curbs){
-        // Kerbs only follow a turn: the apex edge and outer exit are selected by signed curvature.
-
-        
-        
-        this.ribbon(track,side*(half+CURB_WIDTH+.25),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>track.features.threshold*2.6&&Math.sign(track.samples[i].curvature)===side);
-      }
-
+      // Kerbs only follow a turn: the apex edge and outer exit are selected by signed curvature.
+      this.ribbon(track,side*(half+CURB_WIDTH+.25),.45,.020,0x709e81,i=>Math.abs(track.samples[i].curvature)>track.features.threshold*2.6&&Math.sign(track.samples[i].curvature)===side);
     }
-    if(settings.curbs){const data=curbGeometry(track,(x,z)=>this.terrain.sample(x,z)),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setIndex(data.indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.8,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4}));mesh.receiveShadow=true;mesh.castShadow=false;mesh.renderOrder=2;this.circuit.add(mesh);}
+    const data=curbGeometry(track,(x,z)=>this.terrain.sample(x,z)),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setIndex(data.indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.8,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4}));mesh.receiveShadow=true;mesh.castShadow=false;mesh.renderOrder=2;this.circuit.add(mesh);
     // Checkered grid and a real start gantry aligned to the first track tangent.
     const start=track.samples[0],yaw=Math.atan2(-start.tx,-start.tz),grid=new THREE.Group();grid.position.set(start.x,this.terrain.sample(start.x,start.z)+bridgeHeight(track,0)+.03,start.z);grid.rotation.y=yaw;this.circuit.add(grid);
     for(let row=0;row<3;row++)for(let col=0;col<Math.ceil(track.width/.62);col++)this.box(grid,-half+.31+col*.62,.005,(row-1)*.62,.62,.012,.62,(row+col)%2===0?0xf4f1e1:0x263738);
@@ -224,6 +223,7 @@ export class GameScene {
           if(j===0)this.tyreSquealLeft=intensity;else this.tyreSquealRight=intensity;
           const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
           if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
+          this.tyreSmoke.emit(j,center,normal,this.slipVelocity,intensity,this.physics.profile.rearTyreWidth,dt);
           const q=w.worldTransform.quaternion,side=new THREE.Vector3(1,0,0).applyQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w));
           side.addScaledVector(normal,-side.dot(normal)).normalize().multiplyScalar(this.physics.profile.rearTyreWidth*.675);
           const left=center.clone().add(side),right=center.clone().sub(side),previous=this.previousSkid[j];
@@ -232,10 +232,11 @@ export class GameScene {
             (this.skidMarks.geometry.getAttribute('position') as THREE.BufferAttribute).addUpdateRange(offset,18);this.skidCursor=(this.skidCursor+1)%4096;this.skidCount=Math.min(4096,this.skidCount+1);changed=true;
           }}
           this.previousSkid[j]={center,left,right};
-        }else this.previousSkid[j]=null;
+        }else{this.previousSkid[j]=null;this.tyreSmoke.stop(j);}
       }
       if(changed){this.skidMarks.geometry.getAttribute('position').needsUpdate=true;this.skidMarks.geometry.setDrawRange(0,this.skidCount*6);}
-    }else{this.previousSkid=[null,null];this.slipDuration=[0,0];}
+    }else{this.previousSkid=[null,null];this.slipDuration=[0,0];this.tyreSmoke.stop(0);this.tyreSmoke.stop(1);}
+    this.tyreSmoke.update(dt);
     if(running||this.time<2)this.renderer.shadowMap.needsUpdate=true;
     this.renderer.render(this.scene,this.camera);
   }

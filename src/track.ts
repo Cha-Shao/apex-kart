@@ -9,12 +9,12 @@ export interface TrackSample extends Point { tx: number; tz: number; nx: number;
 export interface RunoffSample extends Point {nx:number;nz:number;radius:number}
 export interface RunoffRegion {points:[Point,Point,Point,Point];side:number;index:number;minX:number;maxX:number;minZ:number;maxZ:number}
 export const CURB_WIDTH=1.88;
-export interface TrackData { controls: Point[]; samples: TrackSample[]; features:TrackFeatures;runoff:RunoffSample[]; runoffRegions:RunoffRegion[];curbs:boolean; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
+export interface TrackData { controls: Point[]; samples: TrackSample[]; features:TrackFeatures;runoff:RunoffSample[]; runoffRegions:RunoffRegion[]; length: number; width: number; corners: number; hairpins: number; straightPercent: number; bridges:Bridge[]; bounds: { minX:number;maxX:number;minZ:number;maxZ:number } }
 export interface Bridge { index:number;otherIndex:number;distance:number;height:number;halfLength:number }
 export interface BuildOptions { preserveLayout?:boolean;allowCrossings?:boolean }
 export interface RouteMetadata {circuitId:string;scale:'native'|'compact'}
-export interface TrackSettings { width: number; smoothness: number; curbs: boolean; barriers: boolean }
-export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:60, curbs:true, barriers:false };
+export interface TrackSettings { width: number; smoothness: number; barriers: boolean }
+export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:60, barriers:false };
 export const PRESETS: { id:string; name:string; subtitle:string; points:Point[] }[] = [
   {id:'club',name:'海岸俱乐部',subtitle:'CLUB CIRCUIT',points:[{x:-117,z:80},{x:-45,z:80},{x:45,z:80},{x:119,z:77},{x:145,z:58},{x:144,z:25},{x:125,z:7},{x:79,z:4},{x:65,z:-14},{x:77,z:-34},{x:126,z:-37},{x:143,z:-58},{x:135,z:-86},{x:107,z:-99},{x:20,z:-101},{x:-62,z:-101},{x:-108,z:-92},{x:-130,z:-67},{x:-124,z:-41},{x:-91,z:-24},{x:-52,z:-27},{x:-30,z:-11},{x:-29,z:12},{x:-52,z:29},{x:-110,z:29},{x:-134,z:47},{x:-136,z:65}]},
   {id:'flow',name:'流线公园',subtitle:'FLOW PARK',points:[{x:-128,z:60},{x:-55,z:81},{x:30,z:79},{x:111,z:62},{x:143,z:29},{x:128,z:-7},{x:63,z:-23},{x:47,z:-63},{x:10,z:-92},{x:-55,z:-87},{x:-85,z:-51},{x:-65,z:-12},{x:-103,z:8},{x:-139,z:30}]},
@@ -85,9 +85,9 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   for(let pass=0;pass<3;pass++){const previous=smooth;smooth=previous.map((_,i)=>{let x=0,z=0,w=0;const localRadius=Math.max(radius,Math.min(120,Math.ceil((14*features.scale+features.runoffWidth[i]*.5)/step)));for(let j=-localRadius;j<=localRadius;j++){const weight=localRadius+1-Math.abs(j),p=previous[(i+j+n)%n];x+=p.x*weight;z+=p.z*weight;w+=weight;}return{x:x/w,z:z/w};});}
   const runoff:RunoffSample[]=smooth.map((p,i)=>{const a=smooth[(i-2+n)%n],b=smooth[(i+2)%n],dx=b.x-a.x,dz=b.z-a.z,l=Math.hypot(dx,dz)||1;return {...p,nx:-dz/l,nz:dx/l,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]};});
   const runoffRegions:RunoffRegion[]=[];
-  for(const side of [-1,1])for(let i=0;i<n;i++){const widths=side>0?features.runoffLeft:features.runoffRight,j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;const inner=settings.width/2+(settings.curbs?CURB_WIDTH:0);
+  for(const side of [-1,1])for(let i=0;i<n;i++){const widths=side>0?features.runoffLeft:features.runoffRight,j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;
     const edge=(k:number):[Point,Point]=>{
-      const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=settings.width/2+(settings.curbs?CURB_WIDTH*kerb:0),a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
+      const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=settings.width/2+CURB_WIDTH*kerb,a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
       // Fade the entire lateral displacement, not just the minimum width.
       // At zero width the outer edge meets the road tangentially.
       const width=widths[k];
@@ -96,11 +96,11 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
     };
     const [a,b]=edge(i),[c,d]=edge(j),points:[Point,Point,Point,Point]=[a,b,c,d];runoffRegions.push({points,side,index:i,minX:Math.min(...points.map(p=>p.x)),maxX:Math.max(...points.map(p=>p.x)),minZ:Math.min(...points.map(p=>p.z)),maxZ:Math.max(...points.map(p=>p.z))});
   }
-  return {controls,samples,features,runoff,runoffRegions,curbs:settings.curbs,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
+  return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)}};
 }
 
 export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number,knownNear?:ReturnType<typeof nearestOnTrack>){
-  const near=knownNear??nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;const kerb=(near.signedDistance>=0?track.features.left:track.features.right)[near.index];if(track.curbs&&kerb>0&&d<=track.width/2+CURB_WIDTH*kerb)return true;
+  const near=knownNear??nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;const kerb=(near.signedDistance>=0?track.features.left:track.features.right)[near.index];if(kerb>0&&d<=track.width/2+CURB_WIDTH*kerb)return true;
   const triangle=(a:Point,b:Point,c:Point)=>{const cross=(u:Point,v:Point)=>(v.x-u.x)*(p.z-u.z)-(v.z-u.z)*(p.x-u.x),area=(b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x);if(Math.abs(area)<1e-7)return false;const x=cross(a,b),y=cross(b,c),z=cross(c,a);return x>=-1e-6&&y>=-1e-6&&z>=-1e-6||x<=1e-6&&y<=1e-6&&z<=1e-6;};
   for(const r of track.runoffRegions){if(p.x<r.minX||p.x>r.maxX||p.z<r.minZ||p.z>r.maxZ)continue;const [a,b,c,d]=r.points;if(triangle(a,b,c)||triangle(b,d,c))return true;}return false;
 }
@@ -142,9 +142,9 @@ export function parseTrackFile(text:string):TrackFile {
   const v=JSON.parse(text);
   if(![1,2].includes(v.version)||!Array.isArray(v.points)||v.points.length<5||v.points.length>10000)throw new Error('不支持的赛道文件。请导入 APEX 导出的 JSON。');
   if(v.points.some((p:any)=>!Number.isFinite(p.x)||!Number.isFinite(p.z)||Math.abs(p.x)>20000||Math.abs(p.z)>20000))throw new Error('赛道坐标超出了画布范围。');
-  const settings={...DEFAULT_SETTINGS,...v.settings};
-  const width=Number(settings.width),smoothness=Number(settings.smoothness);
-  settings.width=Math.max(6,Math.min(18,Number.isFinite(width)?width:10));settings.smoothness=Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:60));settings.curbs=!!settings.curbs;settings.barriers=false;
+  const savedSettings={...DEFAULT_SETTINGS,...v.settings};
+  const width=Number(savedSettings.width),smoothness=Number(savedSettings.smoothness);
+  const settings:TrackSettings={width:Math.max(6,Math.min(18,Number.isFinite(width)?width:10)),smoothness:Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:60)),barriers:false};
   const route=v.route&&typeof v.route.circuitId==='string'&&['native','compact'].includes(v.route.scale)?{circuitId:v.route.circuitId.slice(0,80),scale:v.route.scale} as RouteMetadata:undefined;
   buildTrack(v.points,settings,route?{preserveLayout:true,allowCrossings:true}:{});
   const terrain=v.terrain?parseTerrain(v.terrain).toJSON():undefined;
