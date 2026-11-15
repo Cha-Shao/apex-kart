@@ -12,6 +12,6 @@ export async function circuitTerrain(circuit:CircuitPreset,scale:'native'|'compa
     }).catch(error=>{cache.delete(circuit.id);throw error;});
     cache.set(circuit.id,pending);
   }
-  const data=await pending,factor=scale==='compact'?circuit.compactScale:1,heightFactor=scale==='compact'?factor*.5:1;
+  const data=await pending,factor=scale==='compact'?circuit.compactScale:1,heightFactor=scale==='compact'?1/3:1;
   return new TerrainField({...data,size:data.size*factor,originX:data.originX*factor,originZ:data.originZ*factor,heights:data.heights.map(h=>h*heightFactor)});
 }
