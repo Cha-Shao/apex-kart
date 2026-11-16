@@ -39,7 +39,7 @@ export class GameScene {
   mode:CameraMode='orbit';
   tyreSquealLeft=0;
   tyreSquealRight=0;
-  private slipDuration=[0,0];
+  private slipDuration=[0,0,0,0];
   private slipAxle=new Vec3();
   private slipVelocity=new Vec3();
   private slipGroundVelocity=new Vec3();
@@ -94,7 +94,7 @@ export class GameScene {
   }
   resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.track&&this.mode==='orbit')this.frameTrack();}
   setVehicle(){
-    this.tyreSmoke.clear();this.slipDuration=[0,0];
+    this.tyreSmoke.clear();this.slipDuration.fill(0);
     for(const group of [this.kart.root,...this.kart.wheelMeshes]){this.scene.remove(group);this.clearGroup(group);}
     this.kart=this.physics.profile.id==='rb20'?makeRB20():makeKart();this.scene.add(this.kart.root,...this.kart.wheelMeshes);
     this.applyVehicleMaterials();this.replaceKartModel();
@@ -220,7 +220,7 @@ export class GameScene {
     const c=document.createElement('canvas');c.width=1024;c.height=192;const ctx=c.getContext('2d')!;ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='italic 900 116px Arial';ctx.fillText(text,c.width/2,c.height*.53);const map=new THREE.CanvasTexture(c);map.colorSpace=THREE.SRGBColorSpace;return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map}));
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
-    this.tyreSmoke.clear();this.slipDuration=[0,0];
+    this.tyreSmoke.clear();this.slipDuration.fill(0);
     if(this.water){this.scene.remove(this.water.group);this.water.dispose();}
     const coastal=coastalTerrain(track,terrain);
     this.track=track;this.terrain=coastal.field.clone();this.water=TerrainWater.forTerrain(this.terrain,coastal.quays,this.assets);if(this.water)this.scene.add(this.water.group);
@@ -369,9 +369,9 @@ export class GameScene {
     }
     this.tyreSquealLeft=0;this.tyreSquealRight=0;
     if(running&&this.physics.telemetry.speed>12){
-      for(let j=0;j<2;j++){
-        const w=this.physics.vehicle.wheelInfos[j+2];
-        const handbrake=this.physics.profile.id==='kart'&&this.physics.input.handbrake;
+      for(let i=0;i<4;i++){
+        const w=this.physics.vehicle.wheelInfos[i],rear=i>=2;
+        const handbrake=rear&&this.physics.profile.id==='kart'&&this.physics.input.handbrake;
         let lateralSlip=0,rollingSpeed=0;
         if(w.isInContact){
           const point=w.raycastResult.hitPointWorld,normal=w.raycastResult.hitNormalWorld;
@@ -386,21 +386,27 @@ export class GameScene {
         }
         // skidInfo reports friction saturation, not measured wheel slip. Require
         // actual lateral sliding too, with hysteresis and a brief onset delay.
-        const continuing=this.slipDuration[j]>=.07;
+        const continuing=this.slipDuration[i]>=.07;
         const sliding=w.skidInfo<(continuing?.75:.6)&&lateralSlip>Math.max(continuing?.45:.85,rollingSpeed*(continuing?.035:.055));
         const valid=w.isInContact&&!this.physics.telemetry.offroad;
-        this.slipDuration[j]=valid&&sliding?Math.min(.2,this.slipDuration[j]+dt):0;
-        if(valid&&(handbrake||this.slipDuration[j]>=.07)){
+        this.slipDuration[i]=valid&&sliding?Math.min(.2,this.slipDuration[i]+dt):0;
+        if(valid&&(handbrake||this.slipDuration[i]>=.07)){
           const intensity=handbrake?.85:Math.min(1,Math.max(0,(lateralSlip-.4)/3.5));
-          if(j===0)this.tyreSquealLeft=intensity;else this.tyreSquealRight=intensity;
+          const width=rear?this.physics.profile.rearTyreWidth:this.physics.profile.frontTyreWidth;
           const hit=w.raycastResult.hitPointWorld,center=new THREE.Vector3(hit.x,hit.y+.035,hit.z),normal=new THREE.Vector3().copy(w.raycastResult.hitNormalWorld as any);
           if(normal.lengthSq()<.5)normal.set(0,1,0);else normal.normalize();
-          this.tyreSmoke.emit(j,center,normal,this.slipVelocity,intensity,this.physics.profile.rearTyreWidth,dt);
-          this.tyreMarks.emit(j,new THREE.Vector3(hit.x,hit.y,hit.z),normal,new THREE.Vector3(this.slipAxle.x,this.slipAxle.y,this.slipAxle.z),
-            this.physics.profile.rearTyreWidth,intensity,Math.max(2,this.physics.telemetry.speed/3.6*dt*1.8));
-        }else{this.tyreMarks.stop(j);this.tyreSmoke.stop(j);}
+          if(rear){
+            if(i===2)this.tyreSquealLeft=intensity;else this.tyreSquealRight=intensity;
+            this.tyreSmoke.emit(i-2,center,normal,this.slipVelocity,intensity,width,dt);
+          }
+          this.tyreMarks.emit(i,new THREE.Vector3(hit.x,hit.y,hit.z),normal,new THREE.Vector3(this.slipAxle.x,this.slipAxle.y,this.slipAxle.z),
+            width,intensity,Math.max(2,this.physics.telemetry.speed/3.6*dt*1.8));
+        }else{this.tyreMarks.stop(i);if(rear)this.tyreSmoke.stop(i-2);}
       }
-    }else{this.tyreMarks.stop(0);this.tyreMarks.stop(1);this.slipDuration=[0,0];this.tyreSmoke.stop(0);this.tyreSmoke.stop(1);}
+    }else{
+      for(let i=0;i<4;i++)this.tyreMarks.stop(i);
+      this.slipDuration.fill(0);this.tyreSmoke.stop(0);this.tyreSmoke.stop(1);
+    }
     this.tyreMarks.update();
     this.tyreSmoke.update(dt);
     this.scene.updateMatrixWorld();for(const lod of this.treeLODs){lod.update(this.camera);const distance=lod.position.distanceTo(this.camera.position);lod.visible=this.mode==='orbit'||distance<1000;}

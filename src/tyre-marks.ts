@@ -42,7 +42,7 @@ export class TyreMarks {
   private positions=new THREE.BufferAttribute(new Float32Array(CAPACITY*18),3).setUsage(THREE.DynamicDrawUsage);
   private uvs=new THREE.BufferAttribute(new Float32Array(CAPACITY*12),2).setUsage(THREE.DynamicDrawUsage);
   private colors=new THREE.BufferAttribute(new Float32Array(CAPACITY*24).fill(1),4).setUsage(THREE.DynamicDrawUsage);
-  private emitters:Emitter[]=Array.from({length:2},()=>({point:null,tail:[],phase:0}));
+  private emitters:Emitter[]=Array.from({length:4},()=>({point:null,tail:[],phase:0}));
   private serials=new Uint32Array(CAPACITY);
   private cursor=0;
   private count=0;

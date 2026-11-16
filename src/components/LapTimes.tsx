@@ -21,7 +21,7 @@ function LapBadge({kind,count=0}:{kind:'fastest'|'invalid';count?:number}){
   return <span className={`lap-result-badge lap-result-badge--${kind}`} role="img" aria-label={label} title={label}>
     {kind==='fastest'
       ?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 2h4M12 10v4l2 1M18 7l2-2"/><circle cx="12" cy="14" r="8"/></svg>
-      :<><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v9"/><circle cx="12" cy="19" r=".9" fill="currentColor" stroke="none"/></svg><b className="lap-result-count" aria-hidden="true">{count}</b></>}
+      :<><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="10" y="3" width="4" height="13"/><rect x="10" y="18" width="4" height="4"/></svg><b className="lap-result-count" aria-hidden="true">{count}</b></>}
   </span>;
 }
 
