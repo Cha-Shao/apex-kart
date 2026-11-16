@@ -122,10 +122,12 @@ export class SceneAssets {
     });
   }
   private invalidate:()=>void;
+  private roadWearTrack:TrackData|undefined;
   setRoadWear(track:TrackData){
+    if(this.roadWearTrack===track)return;
     const previous=this.roadWear.map.value,texture=roadWearTexture(track,this.maxTextureSize);
     texture.anisotropy=this.anisotropy;this.roadWear.map.value=texture;
-    this.roadWear.size.value.set(track.length,track.width);previous?.dispose();
+    this.roadWear.size.value.set(track.length,track.width);this.roadWearTrack=track;previous?.dispose();
   }
   private texture(id:string,channel:string,repeat=1){
     const key=`${id}/${channel}/${repeat}`;let texture=this.textures.get(key);if(texture)return texture;

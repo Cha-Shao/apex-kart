@@ -2,6 +2,7 @@ import type { Point } from './track';
 
 export interface TerrainData { resolution:number; originX:number; originZ:number; size:number; heights:number[];datumM?:number;waterLevel?:number|null;waterEnabled?:boolean }
 export type BrushMode='raise'|'lower'|'smooth'|'flatten';
+interface PaintBounds {minX:number;maxX:number;minZ:number;maxZ:number}
 const refinedFields=new WeakMap<TerrainField,{revision:number;field:TerrainField}>();
 export class TerrainField {
   readonly resolution:number;
@@ -60,7 +61,7 @@ export class TerrainField {
   }
   paint(p:Point,radius:number,strength:number,dt:number,mode:BrushMode){
     const n=this.resolution,step=this.cellSize,old=mode==='smooth'?this.heights.slice():this.heights;
-    let changed=false;
+    let changed:PaintBounds|undefined;
     const ix=Math.round((p.x-this.originX)/step),iz=Math.round((p.z-this.originZ)/step),r=Math.ceil(radius/step);
     for(let z=Math.max(1,iz-r);z<=Math.min(n-2,iz+r);z++)for(let x=Math.max(1,ix-r);x<=Math.min(n-2,ix+r);x++){
       const dist=Math.hypot(this.originX+x*step-p.x,this.originZ+z*step-p.z)/radius;if(dist>=1)continue;
@@ -69,9 +70,14 @@ export class TerrainField {
       if(mode==='raise'||mode==='lower')next=h+(mode==='raise'?1:-1)*strength*dt*feather;
       else{const target=mode==='flatten'?0:(old[index-1]+old[index+1]+old[index-n]+old[index+n]+old[index]*4)/8;next=h+(target-h)*Math.min(1,strength*dt*.75)*feather;}
       const value=Math.fround(Math.max(-1000,Math.min(1000,next)));
-      if(value!==h){this.heights[index]=value;changed=true;}
+      if(value!==h){
+        this.heights[index]=value;
+        if(!changed)changed={minX:x,maxX:x,minZ:z,maxZ:z};
+        else{changed.minX=Math.min(changed.minX,x);changed.maxX=Math.max(changed.maxX,x);changed.minZ=Math.min(changed.minZ,z);changed.maxZ=Math.max(changed.maxZ,z);}
+      }
     }
     if(changed)this.revision++;
+    return changed;
   }
   clear(){this.heights.fill(0);this.revision++;}
 }
@@ -92,32 +98,63 @@ export class TerrainPainter {
   active=false;
   visible=true;
   onChange:()=>void=()=>{};
+  onStrokeStart:()=>void=()=>{};
+  onStrokeEnd:()=>void=()=>{};
   history:Float32Array[]=[];
   private pointer:Point|null=null;
   private down=false;
+  private strokePointer:number|null=null;
+  private strokeRevision=0;
+  private frame:number|undefined;
   private reverse=false;
   private lastTime=0;
   private ctx:CanvasRenderingContext2D;
   private map=document.createElement('canvas');
+  private mapField:TerrainField|null=null;
+  private mapRevision=-1;
+  private mapImage:ImageData|undefined;
   constructor(public canvas:HTMLCanvasElement,field:TerrainField,private project:(p:Point)=>{x:number;y:number},private unproject:(x:number,y:number)=>Point){
     this.field=field;canvas.width=800;canvas.height=600;this.ctx=canvas.getContext('2d')!;
     canvas.addEventListener('contextmenu',e=>e.preventDefault());
-    canvas.addEventListener('pointerdown',e=>{if(!this.active||e.button>2)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);this.history.push(this.field.heights.slice());if(this.history.length>12)this.history.shift();this.down=true;this.reverse=e.button===2||e.shiftKey;this.updatePointer(e);this.lastTime=performance.now();this.paintFrame(this.lastTime);});
-    canvas.addEventListener('pointermove',e=>{this.updatePointer(e);this.reverse=e.buttons===2||e.shiftKey;if(!this.down)this.draw();});
-    const stop=()=>{if(!this.down)return;this.down=false;this.onChange();this.draw();};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('lostpointercapture',stop);canvas.addEventListener('pointerleave',()=>{if(!this.down){this.pointer=null;this.draw();}});this.draw();
+    canvas.addEventListener('pointerdown',e=>{if(!this.active||this.down||(e.button!==0&&e.button!==2))return;e.preventDefault();canvas.setPointerCapture(e.pointerId);this.history.push(this.field.heights.slice());this.down=true;this.strokePointer=e.pointerId;this.strokeRevision=this.field.revision;this.reverse=e.button===2||e.shiftKey;this.updatePointer(e);this.onStrokeStart();this.lastTime=performance.now();this.paintFrame(this.lastTime);});
+    canvas.addEventListener('pointermove',e=>{if(this.down&&e.pointerId!==this.strokePointer)return;this.updatePointer(e);this.reverse=(e.buttons&2)!==0||e.shiftKey;if(!this.down)this.draw();});
+    const stop=(e:PointerEvent)=>{if(e.pointerId===this.strokePointer)this.finishStroke();};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('lostpointercapture',stop);canvas.addEventListener('pointerleave',()=>{if(!this.down){this.pointer=null;this.draw();}});this.draw();
   }
-  setField(field:TerrainField){this.field=field;this.history=[];this.radius=Math.max(24,field.size*.05);this.draw();}
-  setActive(active:boolean){this.active=active;this.canvas.style.pointerEvents=active?'auto':'none';this.canvas.classList.toggle('painting',active);if(!active){this.down=false;this.pointer=null;}this.draw();}
+  get painting(){return this.down;}
+  private stopStroke(notify=true){
+    if(!this.down)return;
+    this.down=false;
+    if(this.frame!==undefined){cancelAnimationFrame(this.frame);this.frame=undefined;}
+    const pointer=this.strokePointer;this.strokePointer=null;
+    if(pointer!==null&&this.canvas.hasPointerCapture(pointer))this.canvas.releasePointerCapture(pointer);
+    const changed=this.field.revision!==this.strokeRevision;
+    if(!changed)this.history.pop();
+    else if(this.history.length>12)this.history.shift();
+    // Commit one complete stroke; animation frames only update the 2D preview.
+    if(notify){this.draw();if(changed)this.onChange();this.onStrokeEnd();}
+  }
+  finishStroke(){this.stopStroke();}
+  setField(field:TerrainField){this.stopStroke(false);this.field=field;this.history=[];this.radius=Math.max(24,field.size*.05);this.draw();}
+  setActive(active:boolean){if(!active)this.finishStroke();this.active=active;this.canvas.style.pointerEvents=active?'auto':'none';this.canvas.classList.toggle('painting',active);if(!active)this.pointer=null;this.draw();}
   private updatePointer(e:PointerEvent){const r=this.canvas.getBoundingClientRect();this.pointer=this.unproject((e.clientX-r.left)/r.width*800,(e.clientY-r.top)/r.height*600);}
-  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;const revision=this.field.revision;this.field.paint(this.pointer,this.radius,this.strength,dt,mode);if(this.field.revision!==revision){this.draw();this.onChange();}requestAnimationFrame(t=>this.paintFrame(t));}
-  undo(){const h=this.history.pop();if(!h)return;this.field.heights.set(h);this.field.revision++;this.draw();this.onChange();}
-  clear(){this.history.push(this.field.heights.slice());this.field.clear();this.draw();this.onChange();}
-  draw(){
+  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;const changed=this.field.paint(this.pointer,this.radius,this.strength,dt,mode);this.draw(changed);this.frame=requestAnimationFrame(t=>{this.frame=undefined;this.paintFrame(t);});}
+  undo(){this.finishStroke();const h=this.history.pop();if(!h)return;this.field.heights.set(h);this.field.revision++;this.draw();this.onChange();}
+  clear(){this.finishStroke();this.history.push(this.field.heights.slice());this.field.clear();this.draw();this.onChange();}
+  draw(changed?:PaintBounds){
     const c=this.ctx;c.clearRect(0,0,800,600);if(!this.visible&&!this.active)return;
-    const f=this.field,n=f.resolution;this.map.width=n;this.map.height=n;const m=this.map.getContext('2d')!,img=m.createImageData(n,n);
-    const water=f.seaLevel;
-    for(let i=0;i<f.heights.length;i++){const h=f.heights[i],wet=water!==null&&h<water,a=wet?.35+Math.min(.4,(water-h)/12):Math.min(.9,Math.abs(h)/15*1.2);img.data[i*4]=wet?48:h>=0?235:76;img.data[i*4+1]=wet?153:h>=0?164:175;img.data[i*4+2]=wet?185:h>=0?78:225;img.data[i*4+3]=Math.round(a*255);}
-    m.putImageData(img,0,0);const a=this.project({x:f.originX,z:f.originZ}),b=this.project({x:f.originX+f.size,z:f.originZ+f.size});c.imageSmoothingEnabled=true;c.drawImage(this.map,a.x,a.y,b.x-a.x,b.y-a.y);
+    const f=this.field,n=f.resolution;
+    if(this.mapField!==f||this.mapRevision!==f.revision){
+      if(this.map.width!==n||this.map.height!==n){this.map.width=n;this.map.height=n;this.mapImage=undefined;}
+      const m=this.map.getContext('2d')!,img=this.mapImage??=m.createImageData(n,n),water=f.seaLevel;
+      // Brush frames only recolour their changed pixels. Hover and view changes
+      // reuse the image; water changes, undo and replacement refresh it all.
+      const bounds=this.mapField===f&&this.mapRevision===f.revision-1&&changed?changed:{minX:0,maxX:n-1,minZ:0,maxZ:n-1};
+      for(let z=bounds.minZ;z<=bounds.maxZ;z++)for(let x=bounds.minX;x<=bounds.maxX;x++){
+        const i=z*n+x,h=f.heights[i],wet=water!==null&&h<water,a=wet?.35+Math.min(.4,(water-h)/12):Math.min(.9,Math.abs(h)/15*1.2);img.data[i*4]=wet?48:h>=0?235:76;img.data[i*4+1]=wet?153:h>=0?164:175;img.data[i*4+2]=wet?185:h>=0?78:225;img.data[i*4+3]=Math.round(a*255);
+      }
+      m.putImageData(img,0,0,bounds.minX,bounds.minZ,bounds.maxX-bounds.minX+1,bounds.maxZ-bounds.minZ+1);this.mapField=f;this.mapRevision=f.revision;
+    }
+    const a=this.project({x:f.originX,z:f.originZ}),b=this.project({x:f.originX+f.size,z:f.originZ+f.size});c.imageSmoothingEnabled=true;c.drawImage(this.map,a.x,a.y,b.x-a.x,b.y-a.y);
     if(this.pointer&&this.active){const p=this.project(this.pointer),edge=this.project({x:this.pointer.x+this.radius,z:this.pointer.z}),r=Math.abs(edge.x-p.x),g=c.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#e7c78630');g.addColorStop(1,'#e7c78600');c.fillStyle=g;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.strokeStyle='#f1dfaa';c.lineWidth=1.7;c.setLineDash([6,5]);c.stroke();c.setLineDash([]);c.beginPath();c.arc(p.x,p.y,3,0,Math.PI*2);c.fillStyle='#fff2c7';c.fill();}
   }
 }

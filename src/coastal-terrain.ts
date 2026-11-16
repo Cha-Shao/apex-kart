@@ -6,7 +6,33 @@ import type {Point,TrackData} from './track';
 export interface QuayEdge {innerA:Point;innerB:Point;outerA:Point;outerB:Point;innerTopA:number;innerTopB:number;topA:number;topB:number;bottom:number}
 export interface CoastalTerrain {field:TerrainField;quays:QuayEdge[]}
 const cache=new WeakMap<TerrainField,WeakMap<TrackData,{revision:number;result:CoastalTerrain}>>();
+type PavementSample={distance:number;point:Point};
+const pavementCache=new WeakMap<TrackData,{gridKey:string;sample:(index:number)=>PavementSample}>();
 const smooth=(t:number)=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+
+/** Planar pavement queries survive height/water edits. Cache lazily per grid,
+ * replacing the entry when its extent changes; track replacement releases it. */
+function pavementLookup(track:TrackData,grid:TerrainField,reach:number){
+  const {resolution:n,originX,originZ,cellSize:cell}=grid,gridKey=[n,originX,originZ,cell,reach].join('/');
+  const cached=pavementCache.get(track);if(cached?.gridKey===gridKey)return cached.sample;
+  const perimeter=pavementPerimeter(track),distances=new Float64Array(n*n).fill(NaN),xs=new Float64Array(n*n),zs=new Float64Array(n*n);
+  const sample=(index:number):PavementSample=>{
+    if(!Number.isNaN(distances[index]))return {distance:distances[index],point:{x:xs[index],z:zs[index]}};
+    const p={x:originX+(index%n)*cell,z:originZ+Math.floor(index/n)*cell};
+    let distance=Infinity,point=p;
+    for(const polygon of perimeter.index.query(p.x-reach,p.x+reach,p.z-reach,p.z+reach)){
+      if(polygonContains(polygon.points,p)){distance=-1;point=p;break;}
+      const points=polygon.points;
+      for(let j=0;j<points.length;j++){
+        const a=points[j],b=points[(j+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/(dx*dx+dz*dz||1)));
+        const q={x:a.x+dx*t,z:a.z+dz*t},d=Math.hypot(q.x-p.x,q.z-p.z);
+        if(d<distance){distance=d;point=q;}
+      }
+    }
+    distances[index]=distance;xs[index]=point.x;zs[index]=point.z;return {distance,point};
+  };
+  pavementCache.set(track,{gridKey,sample});return sample;
+}
 
 /** Two sweeps propagate nearest seed coordinates. All distances remain in grid
  * cells; work is linear in the heightfield size, never in the track length. */
@@ -42,24 +68,12 @@ export function coastalTerrain(track:TrackData,source:TerrainField):CoastalTerra
     const radius=5,dilated=Uint8Array.from(water.squared,d=>d<=radius*radius?1:0),dry=distances(dilated,n,0);
     const perimeter=pavementPerimeter(track),margin=3.8+cell*Math.SQRT2;
     const reach=Math.max(track.width*5,cell*8),taper=Math.max(2,cell*1.5),depth=Math.max(.5,Math.min(2,cell*.5));
-    const nearestPavement=(p:Point)=>{
-      let distance=Infinity,point:Point=p;
-      for(const polygon of perimeter.index.query(p.x-reach,p.x+reach,p.z-reach,p.z+reach)){
-        if(polygonContains(polygon.points,p))return {distance:-1,point:p};
-        const points=polygon.points;
-        for(let j=0;j<points.length;j++){
-          const a=points[j],b=points[(j+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/(dx*dx+dz*dz||1)));
-          const q={x:a.x+dx*t,z:a.z+dz*t},d=Math.hypot(q.x-p.x,q.z-p.z);
-          if(d<distance){distance=d;point=q;}
-        }
-      }
-      return {distance,point};
-    };
+    const nearestPavement=pavementLookup(track,field,reach);
     for(let i=0;i<total;i++){
       if(wet[i])continue;
       const closing=dilated[i]&&dry.squared[i]>=radius*radius,distanceWater=Math.sqrt(water.squared[i])*cell;
       if(!closing&&distanceWater>reach)continue;
-      const x=i%n,z=Math.floor(i/n),p={x:field.originX+x*cell,z:field.originZ+z*cell},paved=nearestPavement(p);
+      const x=i%n,z=Math.floor(i/n),p={x:field.originX+x*cell,z:field.originZ+z*cell},paved=nearestPavement(i);
       if(paved.distance<=margin)continue;
       if(closing){field.heights[i]=level-depth;continue;}
       if(paved.distance>reach||distanceWater+paved.distance-margin>reach)continue;
