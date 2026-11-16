@@ -69,6 +69,8 @@ export class GameScene {
     this.kart=physics.profile.id==='rb20'?makeRB20():makeKart();
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.75));
+    // Water refraction shares a half-resolution opaque colour buffer.
+    this.renderer.transmissionResolutionScale=.5;
     this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
     this.renderer.shadowMap.autoUpdate=false;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=.92;
@@ -223,7 +225,7 @@ export class GameScene {
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
     this.tyreSmoke.clear();this.slipDuration=[0,0];
-    if(this.water){this.scene.remove(this.water.group);this.clearGroup(this.water.group);}
+    if(this.water){this.scene.remove(this.water.group);this.water.dispose();}
     const coastal=coastalTerrain(track,terrain);
     this.track=track;this.terrain=coastal.field.clone();this.water=TerrainWater.forTerrain(this.terrain,coastal.quays,this.assets);if(this.water)this.scene.add(this.water.group);
     this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);

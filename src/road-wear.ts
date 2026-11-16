@@ -26,6 +26,12 @@ export function roadWearTexture(track:TrackData,maxTextureSize=8192){
   };
   const centerLimit=width/2-.94,wheelLimit=width/2-.19;
   const traffic=(d:number)=>at(line,d)*centerLimit/Math.max(.4,width/2-.28);
+  // Near an edge, spread different laps toward the available asphalt instead
+  // of clipping half of them into the same ruler-straight rail at the limit.
+  const laneAt=(d:number,deviation:number)=>{
+    const center=traffic(d),inward=center/centerLimit*Math.abs(deviation)*1.12;
+    return clamp(center+deviation-inward,-centerLimit,centerLimit);
+  };
   const sampleStep=Math.max(.65,length/8192);
   type TrailPoint={d:number;x:number;half:number};
 
@@ -72,7 +78,7 @@ export function roadWearTexture(track:TrackData,maxTextureSize=8192){
   for(let lap=0;lap<9;lap++){
     const phase=random()*Math.PI*2,lane=(random()-.5)*1.15,gap=.54+random()*.17;
     const weave=(d:number)=>.17*Math.sin(d/length*Math.PI*6+phase)+.08*Math.sin(d/length*Math.PI*14+phase);
-    for(const side of [-1,1])trail(0,length,d=>traffic(d)+lane+weave(d)+side*gap,.18+random()*.1,.035+random()*.025,phase,true);
+    for(const side of [-1,1])trail(0,length,d=>laneAt(d,lane+weave(d))+side*gap,.18+random()*.1,.035+random()*.025,phase,true);
   }
 
   const sourceStep=length/track.samples.length,corners=[...track.features.corners];
@@ -94,7 +100,7 @@ export function roadWearTexture(track:TrackData,maxTextureSize=8192){
       const phase=random()*Math.PI*2,lane=(random()-.5)*Math.min(3.6,width*.42),gap=.53+random()*.22;
       const from=start-lead*(.35+random()*.65)+span*random()*.15,to=start+span*(.78+random()*.22)+exit*random();
       const slide=(random()-.5)*(.35+severity*.8),tyreWidth=.17+random()*.14,opacity=.07+random()*.13;
-      const path=(d:number,t:number)=>clamp(traffic(d)+lane*(1-.34*Math.sin(t*Math.PI))+slide*Math.sin(t*Math.PI)+.07*Math.sin(t*8+phase),-centerLimit,centerLimit);
+      const path=(d:number,t:number)=>laneAt(d,lane*(1-.34*Math.sin(t*Math.PI))+slide*Math.sin(t*Math.PI)+.07*Math.sin(t*8+phase));
       for(const side of [-1,1])trail(from,to,(d,t)=>path(d,t)+side*gap,tyreWidth,opacity,phase,false,pass%3===0);
     }
     // Lockups start on the approach, with different lengths and fading ends.
@@ -102,14 +108,14 @@ export function roadWearTexture(track:TrackData,maxTextureSize=8192){
       const end=start+width*(random()*.55-.3),run=Math.min(corner.approach*.8,width*(1.2+random()*3.2));
       const lane=(random()-.5)*1.5,drift=(random()-.5)*.45,gap=.55+random()*.18,phase=random()*20;
       const opacity=.19+random()*.23,tyreWidth=.18+random()*.11;
-      for(const side of [-1,1])trail(end-run,end,(d,t)=>clamp(traffic(d)+lane+drift*t,-centerLimit,centerLimit)+side*gap,tyreWidth,opacity,phase,false,true);
+      for(const side of [-1,1])trail(end-run,end,(d,t)=>laneAt(d,lane+drift*t)+side*gap,tyreWidth,opacity,phase,false,true);
     }
     // A handful of oversteer corrections cross the older arc-shaped deposits.
     for(let pass=0;pass<1+Math.round(severity*3);pass++){
       const from=start+span*(.08+random()*.55),run=Math.min(span*.65+exit,width*(1.2+random()*1.8));
       const lane=(random()-.5)*width*.24,sweep=turn*(.65+random()*1.4),phase=random()*20,gap=.54+random()*.2;
       const opacity=.18+random()*.2,tyreWidth=.16+random()*.1;
-      for(const side of [-1,1])trail(from,from+run,(d,t)=>clamp(traffic(d)+lane+sweep*(smooth(t)-.4),-centerLimit,centerLimit)+side*gap,tyreWidth,opacity,phase,false,true);
+      for(const side of [-1,1])trail(from,from+run,(d,t)=>laneAt(d,lane+sweep*(smooth(t)-.4))+side*gap,tyreWidth,opacity,phase,false,true);
     }
   }
   const texture=new THREE.CanvasTexture(canvas);texture.name='track-rubber-deposits-and-skids';

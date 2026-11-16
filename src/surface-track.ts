@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {makeRunoffRegions,type TrackData,type TrackSample,type RunoffSample} from './track';
 import type {TerrainField} from './terrain';
+import {resampleRacingLine} from './racing-line';
 const surfaceCache=new WeakMap<TrackData,Map<number,TrackData>>();
 
 /** Dense, smooth render sampling; timing and nearest-segment budgets stay fixed. */
@@ -32,6 +33,7 @@ export function surfaceTrack(track:TrackData,maxStep=1.2):TrackData{
   const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:interpolateWidth(radii,i/n)}));
   const bridges=track.bridges.map(b=>({...b,index:Math.round(b.index/original*n)%n,otherIndex:Math.round(b.otherIndex/original*n)%n}));
   const result={...track,samples,features,runoff,bridges,runoffRegions:makeRunoffRegions(samples,features,track.width,runoff,bridges)};
+  resampleRacingLine(track,result);
   const cache=surfaceCache.get(track)??new Map<number,TrackData>();cache.set(maxStep,result);surfaceCache.set(track,cache);return result;
 }
 
