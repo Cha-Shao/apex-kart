@@ -2,7 +2,16 @@ import type { Point } from './track';
 
 export interface TerrainData { resolution:number; originX:number; originZ:number; size:number; heights:number[];datumM?:number;waterLevel?:number|null;waterEnabled?:boolean }
 export type BrushMode='raise'|'lower'|'smooth'|'flatten';
+/** Radius in metres on a 500 m field; scale with the terrain size. */
+export const BRUSH_RADIUS_RANGE={min:12,max:70,initial:24};
 interface PaintBounds {minX:number;maxX:number;minZ:number;maxZ:number}
+function brushFalloff(distance:number,hardness:number){
+  if(distance>=1)return 0;
+  if(distance<=hardness)return 1;
+  // Hardness sets the solid core. Zero keeps the original soft brush profile.
+  const featherDistance=(distance-hardness)/(1-hardness);
+  return (1-featherDistance*featherDistance)**3;
+}
 const refinedFields=new WeakMap<TerrainField,{revision:number;field:TerrainField}>();
 export class TerrainField {
   readonly resolution:number;
@@ -59,13 +68,14 @@ export class TerrainField {
     // The same diagonal as cannon-es Heightfield after rotating local Y into -Z.
     return tx>tz?a+(b-a)*tx+(d-b)*tz:a+(d-c)*tx+(c-a)*tz;
   }
-  paint(p:Point,radius:number,strength:number,dt:number,mode:BrushMode){
+  paint(p:Point,radius:number,strength:number,dt:number,mode:BrushMode,hardness=0){
     const n=this.resolution,step=this.cellSize,old=mode==='smooth'?this.heights.slice():this.heights;
+    hardness=Math.max(0,Math.min(1,hardness));
     let changed:PaintBounds|undefined;
     const ix=Math.round((p.x-this.originX)/step),iz=Math.round((p.z-this.originZ)/step),r=Math.ceil(radius/step);
     for(let z=Math.max(1,iz-r);z<=Math.min(n-2,iz+r);z++)for(let x=Math.max(1,ix-r);x<=Math.min(n-2,ix+r);x++){
       const dist=Math.hypot(this.originX+x*step-p.x,this.originZ+z*step-p.z)/radius;if(dist>=1)continue;
-      const feather=(1-dist*dist)**3,index=z*n+x,h=this.heights[index];
+      const feather=brushFalloff(dist,hardness),index=z*n+x,h=this.heights[index];
       let next=h;
       if(mode==='raise'||mode==='lower')next=h+(mode==='raise'?1:-1)*strength*dt*feather;
       else{const target=mode==='flatten'?0:(old[index-1]+old[index+1]+old[index-n]+old[index+n]+old[index]*4)/8;next=h+(target-h)*Math.min(1,strength*dt*.75)*feather;}
@@ -93,18 +103,21 @@ export function parseTerrain(data:unknown):TerrainField{
 export class TerrainPainter {
   field:TerrainField;
   mode:BrushMode='raise';
-  radius=24;
+  radius=BRUSH_RADIUS_RANGE.initial;
   strength=4;
+  hardness=0;
   active=false;
   visible=true;
   onChange:()=>void=()=>{};
   onStrokeStart:()=>void=()=>{};
   onStrokeEnd:()=>void=()=>{};
+  onBrushChange:()=>void=()=>{};
   history:Float32Array[]=[];
   private pointer:Point|null=null;
   private down=false;
   private strokePointer:number|null=null;
   private strokeRevision=0;
+  private brushDrag:{pointerId:number;x:number;y:number;radius:number;hardness:number}|null=null;
   private frame:number|undefined;
   private reverse=false;
   private lastTime=0;
@@ -116,9 +129,27 @@ export class TerrainPainter {
   constructor(public canvas:HTMLCanvasElement,field:TerrainField,private project:(p:Point)=>{x:number;y:number},private unproject:(x:number,y:number)=>Point){
     this.field=field;canvas.width=800;canvas.height=600;this.ctx=canvas.getContext('2d')!;
     canvas.addEventListener('contextmenu',e=>e.preventDefault());
-    canvas.addEventListener('pointerdown',e=>{if(!this.active||this.down||(e.button!==0&&e.button!==2))return;e.preventDefault();canvas.setPointerCapture(e.pointerId);this.history.push(this.field.heights.slice());this.down=true;this.strokePointer=e.pointerId;this.strokeRevision=this.field.revision;this.reverse=e.button===2||e.shiftKey;this.updatePointer(e);this.onStrokeStart();this.lastTime=performance.now();this.paintFrame(this.lastTime);});
-    canvas.addEventListener('pointermove',e=>{if(this.down&&e.pointerId!==this.strokePointer)return;this.updatePointer(e);this.reverse=(e.buttons&2)!==0||e.shiftKey;if(!this.down)this.draw();});
-    const stop=(e:PointerEvent)=>{if(e.pointerId===this.strokePointer)this.finishStroke();};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('lostpointercapture',stop);canvas.addEventListener('pointerleave',()=>{if(!this.down){this.pointer=null;this.draw();}});this.draw();
+    canvas.addEventListener('pointerdown',e=>{
+      if(!this.active||this.down||this.brushDrag||(e.button!==0&&e.button!==2))return;
+      e.preventDefault();canvas.setPointerCapture(e.pointerId);this.updatePointer(e);
+      if(e.button===2){this.brushDrag={pointerId:e.pointerId,x:e.clientX,y:e.clientY,radius:this.radius*500/this.field.size,hardness:this.hardness};this.draw();return;}
+      this.history.push(this.field.heights.slice());this.down=true;this.strokePointer=e.pointerId;this.strokeRevision=this.field.revision;this.reverse=e.shiftKey;this.onStrokeStart();this.lastTime=performance.now();this.paintFrame(this.lastTime);
+    });
+    canvas.addEventListener('pointermove',e=>{
+      const drag=this.brushDrag;
+      if(drag){
+        if(e.pointerId!==drag.pointerId)return;
+        if((e.buttons&2)===0){this.stopBrushDrag();this.updatePointer(e);this.draw();return;}
+        e.preventDefault();
+        // Keep the preview at the right-click anchor while changing its shape.
+        this.radius=Math.max(BRUSH_RADIUS_RANGE.min,Math.min(BRUSH_RADIUS_RANGE.max,Math.round(drag.radius+(e.clientX-drag.x)/4)))*this.field.size/500;
+        this.hardness=Math.max(0,Math.min(1,Math.round((drag.hardness-(e.clientY-drag.y)/200)*100)/100));
+        this.onBrushChange();this.draw();return;
+      }
+      if(this.down){if(e.pointerId!==this.strokePointer)return;if((e.buttons&1)===0||(e.buttons&2)!==0)this.finishStroke();}
+      this.updatePointer(e);this.reverse=e.shiftKey;if(!this.down)this.draw();
+    });
+    const stop=(e:PointerEvent)=>{if(e.pointerId===this.strokePointer||e.pointerId===this.brushDrag?.pointerId)this.finishStroke();};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('lostpointercapture',stop);canvas.addEventListener('pointerleave',()=>{if(!this.down&&!this.brushDrag){this.pointer=null;this.draw();}});window.addEventListener('blur',()=>this.finishStroke());this.draw();
   }
   get painting(){return this.down;}
   private stopStroke(notify=true){
@@ -133,11 +164,17 @@ export class TerrainPainter {
     // Commit one complete stroke; animation frames only update the 2D preview.
     if(notify){this.draw();if(changed)this.onChange();this.onStrokeEnd();}
   }
-  finishStroke(){this.stopStroke();}
-  setField(field:TerrainField){this.stopStroke(false);this.field=field;this.history=[];this.radius=Math.max(24,field.size*.05);this.draw();}
+  private stopBrushDrag(){
+    const drag=this.brushDrag;if(!drag)return;
+    this.brushDrag=null;
+    if(this.canvas.hasPointerCapture(drag.pointerId))this.canvas.releasePointerCapture(drag.pointerId);
+    this.draw();
+  }
+  finishStroke(){this.stopStroke();this.stopBrushDrag();}
+  setField(field:TerrainField){this.stopStroke(false);this.stopBrushDrag();this.field=field;this.history=[];this.radius=Math.max(24,field.size*.05);this.draw();}
   setActive(active:boolean){if(!active)this.finishStroke();this.active=active;this.canvas.style.pointerEvents=active?'auto':'none';this.canvas.classList.toggle('painting',active);if(!active)this.pointer=null;this.draw();}
   private updatePointer(e:PointerEvent){const r=this.canvas.getBoundingClientRect();this.pointer=this.unproject((e.clientX-r.left)/r.width*800,(e.clientY-r.top)/r.height*600);}
-  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;const changed=this.field.paint(this.pointer,this.radius,this.strength,dt,mode);this.draw(changed);this.frame=requestAnimationFrame(t=>{this.frame=undefined;this.paintFrame(t);});}
+  private paintFrame(now:number){if(!this.down||!this.pointer)return;const dt=Math.min(.05,Math.max(.008,(now-this.lastTime)/1000));this.lastTime=now;const mode=this.reverse?(this.mode==='raise'?'lower':this.mode==='lower'?'raise':this.mode):this.mode;const changed=this.field.paint(this.pointer,this.radius,this.strength,dt,mode,this.hardness);this.draw(changed);this.frame=requestAnimationFrame(t=>{this.frame=undefined;this.paintFrame(t);});}
   undo(){this.finishStroke();const h=this.history.pop();if(!h)return;this.field.heights.set(h);this.field.revision++;this.draw();this.onChange();}
   clear(){this.finishStroke();this.history.push(this.field.heights.slice());this.field.clear();this.draw();this.onChange();}
   draw(changed?:PaintBounds){
@@ -155,6 +192,16 @@ export class TerrainPainter {
       m.putImageData(img,0,0,bounds.minX,bounds.minZ,bounds.maxX-bounds.minX+1,bounds.maxZ-bounds.minZ+1);this.mapField=f;this.mapRevision=f.revision;
     }
     const a=this.project({x:f.originX,z:f.originZ}),b=this.project({x:f.originX+f.size,z:f.originZ+f.size});c.imageSmoothingEnabled=true;c.drawImage(this.map,a.x,a.y,b.x-a.x,b.y-a.y);
-    if(this.pointer&&this.active){const p=this.project(this.pointer),edge=this.project({x:this.pointer.x+this.radius,z:this.pointer.z}),r=Math.abs(edge.x-p.x),g=c.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#e7c78630');g.addColorStop(1,'#e7c78600');c.fillStyle=g;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.strokeStyle='#f1dfaa';c.lineWidth=1.7;c.setLineDash([6,5]);c.stroke();c.setLineDash([]);c.beginPath();c.arc(p.x,p.y,3,0,Math.PI*2);c.fillStyle='#fff2c7';c.fill();}
+    if(this.pointer&&this.active){
+      const p=this.project(this.pointer),edge=this.project({x:this.pointer.x+this.radius,z:this.pointer.z}),r=Math.abs(edge.x-p.x);
+      if(this.hardness<1){
+        const g=c.createRadialGradient(p.x,p.y,r*this.hardness,p.x,p.y,r);
+        for(let i=0;i<=8;i++)g.addColorStop(i/8,`rgba(231,199,134,${brushFalloff(i/8,0)*.2})`);
+        c.fillStyle=g;
+      }else c.fillStyle='#e7c78633';
+      c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.strokeStyle='#f1dfaa';c.lineWidth=1.7;c.setLineDash([6,5]);c.stroke();c.setLineDash([]);
+      if(this.hardness>0&&this.hardness<1){c.beginPath();c.arc(p.x,p.y,r*this.hardness,0,Math.PI*2);c.lineWidth=1;c.strokeStyle='#f1dfaa99';c.stroke();}
+      c.beginPath();c.arc(p.x,p.y,3,0,Math.PI*2);c.fillStyle='#fff2c7';c.fill();
+    }
   }
 }

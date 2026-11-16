@@ -18,7 +18,7 @@ import { KartPhysics } from './physics';
 import { GameScene, type CameraMode } from './scene';
 import {START_LIGHT_COUNT,StartSequence} from './start-signal';
 import { EngineAudio } from './audio';
-import { TerrainField, TerrainPainter, parseTerrain, type BrushMode } from './terrain';
+import { BRUSH_RADIUS_RANGE, TerrainField, TerrainPainter, parseTerrain, type BrushMode } from './terrain';
 import { PedalHistory } from './telemetry';
 import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
 import {circuitTerrain,CIRCUIT_TERRAIN_VERSION} from './preset-terrain';
@@ -70,8 +70,16 @@ $('#app').innerHTML=`
       <div class="library-block"><div class="section-label"><span>真实赛道库</span><span class="library-badge">2026 / DAYTONA</span></div><div class="library-select-row"><select id="circuit-select" aria-label="选择真实赛道"><option value="">选择 F1 赛道或戴托纳…</option>${(['current-2026','original-2026','bonus'] as const).map((status,i)=>`<optgroup label="${['2026 当前赛历','2026 原定布局（调整前）','耐力经典'][i]}">${CIRCUIT_LIBRARY.filter(c=>c.calendarStatus===status).map(c=>`<option value="${c.id}">${c.round?`${String(c.round).padStart(2,'0')} · `:''}${c.name}</option>`).join('')}</optgroup>`).join('')}</select></div><div class="library-load-row"><div id="circuit-scale" class="circuit-scale-tabs" role="tablist" aria-label="赛道尺寸"><button type="button" class="circuit-scale-tab" role="tab" data-scale="native" aria-selected="true" tabindex="0" aria-controls="library-info">原尺寸 · 1:1</button><button type="button" class="circuit-scale-tab" role="tab" data-scale="compact" aria-selected="false" tabindex="-1" aria-controls="library-info">卡丁车缩放版</button></div></div><p id="library-info">${CIRCUIT_LIBRARY.filter(c=>c.calendarStatus==='current-2026').length} 条现行 F1 布局 + 原定布局 + 戴托纳。<br>含 DEM 近似高程，载入后可用高度笔刷调整。</p><a class="library-credit" href="/circuit-credits.html" target="_blank" rel="noopener">赛历来源与数据许可 ↗</a></div>
       <div class="editor-section"><div class="section-label"><span><b>01</b> 绘制布局</span><div class="canvas-tools"><button class="tool" data-tool="draw" title="画笔：一笔画出闭合环线" aria-label="画笔工具"><i data-lucide="pencil"></i></button><button class="tool selected" data-tool="edit" title="拖动控制点调整路线" aria-label="控制点工具"><i data-lucide="mouse-pointer-2"></i></button><span></span><button class="tool" id="undo-button" title="撤销" aria-label="撤销"><i data-lucide="undo-2"></i></button><button class="tool" id="clear-button" title="清空画布" aria-label="清空画布"><i data-lucide="trash-2"></i></button></div></div>
       <div class="layer-tabs"><button class="selected" data-layer="route">路线控制点</button><button data-layer="height">地形高度层</button><label><input id="height-visible" type="checkbox" checked/>显示高度</label></div>
-      <div id="reference-controls"></div><div class="canvas-wrap"><canvas id="reference-canvas" width="800" height="600" aria-hidden="true"></canvas><canvas id="track-canvas" aria-label="赛道绘制画布。使用画笔绘制，左键拖动控制点，右键删除控制点。" tabindex="0"></canvas><canvas id="height-canvas" aria-label="地形高度覆盖层。羽化笔刷绘制，Shift 或右键反向。"></canvas><span class="canvas-badge" id="layer-badge"><i data-lucide="sparkles"></i> 自动平滑</span><span class="canvas-corner">N ↑</span></div>
-      <div class="terrain-tools" id="terrain-tools" hidden><div class="brush-modes"><button class="selected" data-brush="raise">抬高 ＋</button><button data-brush="lower">压低 −</button><button data-brush="smooth">平滑</button><button data-brush="flatten">归零</button></div><label class="range-label" for="brush-radius"><span>羽化半径</span><output id="brush-radius-output">24 m</output></label><input id="brush-radius" type="range" min="12" max="70" value="24"/><label class="range-label" for="brush-strength"><span>高度速率</span><output id="brush-strength-output">4 m/s</output></label><input id="brush-strength" type="range" min="1" max="12" value="4"/><div class="terrain-actions"><button id="undo-height"><i data-lucide="undo-2"></i>撤销高度</button><span id="height-range">0.0 — 0.0 m</span><button id="clear-height">清空高度</button></div><p>按住涂抹，边缘自动羽化。Shift / 右键反向；松手后统一更新地形、路面与碰撞。</p><div class="water-controls"><div class="water-controls-heading"><label for="water-enabled">水面</label><input id="water-enabled" type="checkbox" checked/></div><label class="water-level-row" for="water-level"><span>水位高度</span><input id="water-level" type="number" min="-12000" max="12000" step="0.001" value="-1"/><span>m</span></label><p>地形低于水位时自动出现水面。用压低笔刷挖出湖泊或海湾；水位随赛道一起保存。</p></div></div>
+      <div id="reference-controls"></div><div class="canvas-wrap"><canvas id="reference-canvas" width="800" height="600" aria-hidden="true"></canvas><canvas id="track-canvas" aria-label="赛道绘制画布。使用画笔绘制，左键拖动控制点，右键删除控制点。" tabindex="0"></canvas><canvas id="height-canvas" aria-label="地形高度覆盖层。左键涂抹，Shift 加左键反向。按住右键左右拖动调整画笔大小，上下拖动调整羽化硬度。"></canvas><span class="canvas-badge" id="layer-badge"><i data-lucide="sparkles"></i> 自动平滑</span><span class="canvas-corner">N ↑</span></div>
+      <div class="terrain-tools" id="terrain-tools" hidden>
+        <div class="brush-modes"><button class="selected" data-brush="raise">抬高 ＋</button><button data-brush="lower">压低 −</button><button data-brush="smooth">平滑</button><button data-brush="flatten">归零</button></div>
+        <label class="range-label" for="brush-radius"><span>画笔大小（半径）</span><output id="brush-radius-output">24 m</output></label><input id="brush-radius" type="range" min="${BRUSH_RADIUS_RANGE.min}" max="${BRUSH_RADIUS_RANGE.max}" value="${BRUSH_RADIUS_RANGE.initial}"/>
+        <label class="range-label" for="brush-hardness"><span>羽化硬度</span><output id="brush-hardness-output">0%</output></label><input id="brush-hardness" type="range" min="0" max="100" value="0"/>
+        <label class="range-label" for="brush-strength"><span>高度速率</span><output id="brush-strength-output">4 m/s</output></label><input id="brush-strength" type="range" min="1" max="12" value="4"/>
+        <div class="terrain-actions"><button id="undo-height"><i data-lucide="undo-2"></i>撤销高度</button><span id="height-range">0.0 — 0.0 m</span><button id="clear-height">清空高度</button></div>
+        <p>左键涂抹，Shift＋左键反向。按住右键：向右放大、向左缩小，向上变硬、向下变软。硬度越低，边缘羽化越宽；松手后统一更新地形、路面与碰撞。</p>
+        <div class="water-controls"><div class="water-controls-heading"><label for="water-enabled">水面</label><input id="water-enabled" type="checkbox" checked/></div><label class="water-level-row" for="water-level"><span>水位高度</span><input id="water-level" type="number" min="-12000" max="12000" step="0.001" value="-1"/><span>m</span></label><p>地形低于水位时自动出现水面。用压低笔刷挖出湖泊或海湾；水位随赛道一起保存。</p></div>
+      </div>
       <div class="canvas-legend"><span><b class="legend-dot straight"></b>直道</span><span><b class="legend-dot curve"></b>缓弯</span><span><b class="legend-dot hairpin"></b>急弯</span><span class="auto-close"><i data-lucide="check"></i>自动闭合</span></div>
       <p class="editor-status" id="editor-status">拖动控制点，微调你的走线。</p></div>
       <div class="editor-section settings-section"><div class="section-label"><span><b>02</b> 赛道设定</span><i data-lucide="settings-2"></i></div>
@@ -165,6 +173,7 @@ editor.setPoints(appliedPoints,false);dirty=false;setStatus('拖动控制点，�
 terrainPainter=new TerrainPainter($('#height-canvas'),appliedTerrain.clone(),p=>editor.project(p),(x,y)=>editor.unproject(x,y));
 terrainPainter.onStrokeStart=()=>{if(previewTimer!==undefined){clearTimeout(previewTimer);previewTimer=undefined;}};
 terrainPainter.onStrokeEnd=()=>{if(dirty)scheduleDraft();};
+terrainPainter.onBrushChange=syncBrushControls;
 let observedField=terrainPainter.field,observedRevision=observedField.revision;
 terrainPainter.onChange=()=>{
   const field=terrainPainter!.field;if(field===observedField&&field.revision===observedRevision)return;
@@ -232,11 +241,22 @@ $('#new-button').addEventListener('click',()=>{$<HTMLSelectElement>('#circuit-se
 $('#clear-button').addEventListener('click',()=>$('#new-button').click());$('#undo-button').addEventListener('click',()=>editor.undo());
 $('#width-range').addEventListener('input',e=>{settings.width=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
 $('#smooth-range').addEventListener('input',e=>{settings.smoothness=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
+function syncBrushControls(){
+  if(!terrainPainter)return;
+  const radius=$<HTMLInputElement>('#brush-radius'),strength=$<HTMLInputElement>('#brush-strength'),hardness=$<HTMLInputElement>('#brush-hardness');
+  radius.value=String(Math.round(terrainPainter.radius*500/terrainPainter.field.size));strength.value=String(terrainPainter.strength);hardness.value=String(Math.round(terrainPainter.hardness*100));
+  for(const input of [radius,hardness,strength])syncRangeFill(input);
+  $('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-hardness-output').textContent=`${hardness.value}%`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;
+}
+function updateBrushControls(){
+  if(!terrainPainter)return;
+  terrainPainter.radius=terrainPainter.field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);terrainPainter.hardness=Number($<HTMLInputElement>('#brush-hardness').value)/100;
+  syncBrushControls();terrainPainter.draw();
+}
 function updateTerrainControls(){
   if(!terrainPainter)return;
   const field=terrainPainter.field,level=field.seaLevel,input=$<HTMLInputElement>('#water-level');
-  terrainPainter.radius=field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);
-  $('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;$('#height-range').textContent=`${field.min.toFixed(1)} — ${field.max.toFixed(1)} m`;
+  updateBrushControls();$('#height-range').textContent=`${field.min.toFixed(1)} — ${field.max.toFixed(1)} m`;
   $<HTMLInputElement>('#water-enabled').checked=level!==null;input.disabled=level===null;
   if(document.activeElement!==input)input.value=String(Math.round(field.defaultWaterLevel*1000)/1000);
 }
@@ -257,7 +277,7 @@ function syncRangeFill(input:HTMLInputElement){
   input.style.setProperty('--progress',Math.max(0,Math.min(100,(value-minimum)/Math.max(.00001,maximum-minimum)*100))+'%');
 }
 document.querySelectorAll<HTMLInputElement>('input[type="range"]').forEach(input=>{syncRangeFill(input);input.addEventListener('input',()=>syncRangeFill(input));});
-for(const id of ['brush-radius','brush-strength'])$<HTMLInputElement>('#'+id).addEventListener('input',updateTerrainControls);
+for(const id of ['brush-radius','brush-hardness','brush-strength'])$<HTMLInputElement>('#'+id).addEventListener('input',updateBrushControls);
 $('#height-visible').addEventListener('change',e=>{terrainPainter!.visible=(e.target as HTMLInputElement).checked;terrainPainter!.draw();});$('#undo-height').addEventListener('click',()=>terrainPainter!.undo());$('#clear-height').addEventListener('click',()=>terrainPainter!.clear());
 async function loadSelectedCircuit(){
   const c=CIRCUIT_LIBRARY.find(c=>c.id===$<HTMLSelectElement>('#circuit-select').value);if(!c){elevationLoad++;loadingElevation=false;return;}
