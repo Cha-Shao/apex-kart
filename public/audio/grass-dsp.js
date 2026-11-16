@@ -1,9 +1,9 @@
-// Original procedural grass/soil rolling noise: low earth rumble, leaf rustle
-// and irregular clods. Independent wheel-side signals avoid a repeating loop.
+// Continuous dry grass brushed under tyres: a steady leafy rustle with subtle
+// texture changes and fine stem crackles, without loose-stone rumble.
 export class GrassRoll {
   constructor(sampleRate=48000){
     this.sampleRate=sampleRate;this.speed=0;this.seed=0x1b873593;
-    this.channels=Array.from({length:2},()=>({target:0,gain:0,soilLow:0,soilHigh:0,leafLow:0,leafHigh:0,grain:0,grainClock:0,flutter:0,flutterTarget:0}));
+    this.channels=Array.from({length:2},()=>({target:0,gain:0,leafLow:0,leafHigh:0,bladeLow:0,bladeHigh:0,tone:0,toneTarget:0,rustleClock:0,rustle:0,rustleTarget:0,fibreClock:0,fibre:0}));
   }
 
   noise(){this.seed=(Math.imul(this.seed,1664525)+1013904223)|0;return (this.seed>>>0)/2147483648-1;}
@@ -20,26 +20,36 @@ export class GrassRoll {
     if(this.channels.every(c=>c.target===0&&c.gain<1e-6))return;
     const sr=this.sampleRate,speed=this.speed/3.6;
     const attack=1-Math.exp(-1/(sr*.035)),release=1-Math.exp(-1/(sr*.10));
-    const soilLow=1-Math.exp(-2*Math.PI*45/sr),soilHigh=1-Math.exp(-2*Math.PI*(280+Math.min(250,speed*6))/sr);
-    const leafLow=1-Math.exp(-2*Math.PI*650/sr),leafHigh=1-Math.exp(-2*Math.PI*(2200+Math.min(1600,speed*35))/sr);
-    const flutter=1-Math.exp(-1/(sr*.018)),grainDecay=Math.exp(-1/(sr*.009));
+    const leafLow=1-Math.exp(-2*Math.PI*1050/sr);
+    const bladeLow=1-Math.exp(-2*Math.PI*2800/sr),bladeHigh=1-Math.exp(-2*Math.PI*5600/sr);
+    const pace=Math.sqrt(1+Math.min(35,speed)*.65),fibreDecay=Math.exp(-1/(sr*.003));
+    const textureSmoothing=1-Math.exp(-1/(sr*.025));
     for(let i=0;i<left.length;i++){
       let l=0,r=0;
       for(let side=0;side<2;side++){
         const c=this.channels[side];
         c.gain+=(c.target-c.gain)*(c.target>c.gain?attack:release);
-        if(--c.grainClock<=0){
-          // Random spacing shrinks with distance travelled, rather than RPM.
-          c.grainClock=sr*(.045+.10*(this.noise()*.5+.5))/(1+speed*.12);
-          c.grain=.35+.65*(this.noise()*.5+.5);c.flutterTarget=this.noise();
+        if(--c.rustleClock<=0){
+          // Vary the texture gently over a continuous rustle. There are no
+          // footstep envelopes or gaps while the tyres keep rolling on grass.
+          c.rustleClock=sr*(.11+.075*(this.noise()*.5+.5))/pace;
+          c.rustleTarget=this.noise();
+          c.toneTarget=1-Math.exp(-2*Math.PI*(2400+1100*(this.noise()*.5+.5))/sr);
         }
-        c.grain*=grainDecay;c.flutter+=(c.flutterTarget-c.flutter)*flutter;
-        const noise=this.noise();
-        c.soilLow+=(noise-c.soilLow)*soilLow;c.soilHigh+=(noise-c.soilHigh)*soilHigh;
-        c.leafLow+=(noise-c.leafLow)*leafLow;c.leafHigh+=(noise-c.leafHigh)*leafHigh;
-        const soil=(c.soilHigh-c.soilLow)*1.65;
-        const leaves=(c.leafHigh-c.leafLow)*(.42+c.grain*.75);
-        const out=Math.tanh((soil+leaves)*(.85+c.flutter*.25)*2.1)*c.gain;
+        c.rustle+=(c.rustleTarget-c.rustle)*textureSmoothing;
+        c.tone+=(c.toneTarget-c.tone)*textureSmoothing;
+        if(--c.fibreClock<=0){
+          c.fibreClock=sr*(.012+.035*(this.noise()*.5+.5))/pace;
+          c.fibre=.3+.7*(this.noise()*.5+.5);
+        }
+        c.fibre*=fibreDecay;
+        const leafNoise=this.noise(),bladeNoise=this.noise();
+        c.leafLow+=(leafNoise-c.leafLow)*leafLow;
+        c.leafHigh+=(leafNoise-c.leafLow-c.leafHigh)*c.tone;
+        c.bladeLow+=(bladeNoise-c.bladeLow)*bladeLow;c.bladeHigh+=(bladeNoise-c.bladeHigh)*bladeHigh;
+        const leaves=c.leafHigh*1.05*(.92+c.rustle*.08);
+        const fibres=(c.bladeHigh-c.bladeLow)*(.08+c.fibre*.22);
+        const out=Math.tanh((leaves+fibres)*1.65)*c.gain;
         if(side===0)l=out;else r=out;
       }
       left[i]=Math.max(-1,Math.min(1,left[i]+l+r*.16));

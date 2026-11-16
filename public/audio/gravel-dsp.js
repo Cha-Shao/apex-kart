@@ -11,7 +11,7 @@ export class GravelRoll {
   set({speed=0,gravelLeft=0,gravelRight=0,running=false,enabled=false}={}){
     this.speed=Math.max(0,speed);
     const rolling=Math.min(1,Math.max(0,(this.speed-.25)/4));
-    const volume=running&&enabled?rolling*(.06+.19*Math.sqrt(Math.min(1,this.speed/110)))*.5:0;
+    const volume=running&&enabled?rolling*(.06+.19*Math.sqrt(Math.min(1,this.speed/110)))*.25:0;
     this.channels[0].target=Math.max(0,Math.min(1,gravelLeft))*volume;
     this.channels[1].target=Math.max(0,Math.min(1,gravelRight))*volume;
   }
