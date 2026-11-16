@@ -6,6 +6,15 @@ import {roadWearTexture} from './road-wear';
 import type {TrackData} from './track';
 
 const BASE='/assets/cc0/';
+// Source-map averages keep surfaces recognisable while the PBR images download.
+const PBR_FALLBACKS:Record<string,{color:string;roughness:number}>={
+  grass:{color:'#445c28',roughness:139},
+  clean_asphalt:{color:'#444746',roughness:168},
+  concrete_layers_02:{color:'#7d7a74',roughness:210},
+  corrugated_iron:{color:'#aab3ae',roughness:180},
+  fabric_pattern_07:{color:'#9b5955',roughness:163},
+  rubber_tiles:{color:'#1f2125',roughness:191},
+};
 /** UVs in metres keep road/ground texture scale identical across every circuit. */
 export function surfaceUVs(geometry:THREE.BufferGeometry,metres:number){
   const positions=geometry.getAttribute('position'),uv=new Float32Array(positions.count*2);
@@ -122,7 +131,15 @@ export class SceneAssets {
     const key=`${id}/${channel}/${repeat}`;let texture=this.textures.get(key);if(texture)return texture;
     texture=this.loader.load(`${BASE}${id}-${channel}.webp`,()=>this.invalidate(),undefined,error=>{this.failures.push(`${key}: ${String(error)}`);});
     texture.colorSpace=channel==='color'?THREE.SRGBColorSpace:THREE.NoColorSpace;
-    texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.setScalar(repeat);texture.anisotropy=this.anisotropy;texture.userData.sharedCC0=true;this.textures.set(key,texture);return texture;
+    texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.setScalar(repeat);texture.anisotropy=this.anisotropy;texture.userData.sharedCC0=true;
+    const fallback=PBR_FALLBACKS[id],roughness=fallback?.roughness??255;
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+    const context=canvas.getContext('2d')!;
+    context.fillStyle=channel==='normal'?'#8080ff':channel==='roughness'?`rgb(${roughness},${roughness},${roughness})`:fallback?.color??'#ffffff';
+    context.fillRect(0,0,1,1);
+    // TextureLoader replaces this image in place on success; errors keep the fallback.
+    texture.image=canvas;texture.needsUpdate=true;
+    this.textures.set(key,texture);return texture;
   }
   private pbr(id:string,color:number,roughness:number,normalStrength:number,repeat=1){
     return new THREE.MeshStandardMaterial({color,roughness,map:this.texture(id,'color',repeat),normalMap:this.texture(id,'normal',repeat),roughnessMap:this.texture(id,'roughness',repeat),normalScale:new THREE.Vector2(normalStrength,normalStrength)});

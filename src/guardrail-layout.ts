@@ -10,15 +10,20 @@ export interface GuardrailPoint extends Point {deck:number;nx:number;nz:number;d
 interface RailLoop {points:GuardrailPoint[];length:number;area:number}
 export interface GuardrailLayout {paths:GuardrailPoint[][];posts:GuardrailPoint[]}
 const layoutCache=new WeakMap<TrackData,GuardrailLayout>();
+const perimeterCache=new WeakMap<TrackData,ReturnType<typeof makePerimeter>>();
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
 const wrap=(d:number,length:number)=>(d%length+length)%length;
 const along=(a:number,b:number,length:number)=>{const d=Math.abs(a-b);return Math.min(d,length-d);};
 
-function perimeter(track:TrackData){
+function makePerimeter(track:TrackData){
   const dense=surfaceTrack(track),polygons=[...roadFootprint(dense.samples,dense.features,dense.width),...dense.runoffRegions];
   return {dense,field:paddedFootprint(polygons,PADDING,track.length>3500?1.5:1.25),index:new FootprintIndex(polygons)};
 }
-function railLoop(contour:FootprintContour,data:ReturnType<typeof perimeter>):RailLoop{
+/** Shared pavement union: guardrails and shoreline foundations use one edge. */
+export function pavementPerimeter(track:TrackData){
+  let cached=perimeterCache.get(track);if(!cached){cached=makePerimeter(track);perimeterCache.set(track,cached);}return cached;
+}
+function railLoop(contour:FootprintContour,data:ReturnType<typeof pavementPerimeter>):RailLoop{
   const {dense,field,index}=data,smooth:Point[]=[];
   // Smooth the contour, then project it outside the padded pavement again.
   for(let i=0;i<contour.points.length;i++){
@@ -59,7 +64,7 @@ export const guardrailHeight=(p:GuardrailPoint,terrain:TerrainField)=>terrain.sa
  * and overlapping return. Heights are sampled from each consumer's terrain. */
 export function guardrailLayout(track:TrackData):GuardrailLayout{
   const cached=layoutCache.get(track);if(cached)return cached;
-  const data=perimeter(track),loops=data.field.contours.map(c=>railLoop(c,data)).sort((a,b)=>b.area-a.area),paths:GuardrailPoint[][]=[],posts:GuardrailPoint[]=[];
+  const data=pavementPerimeter(track),loops=data.field.contours.map(c=>railLoop(c,data)).sort((a,b)=>b.area-a.area),paths:GuardrailPoint[][]=[],posts:GuardrailPoint[]=[];
   let passageBudget=Math.max(1,Math.min(4,Math.ceil(track.length/2200)));
   for(const loop of loops){
     const openings:number[]=[],count=loop.area>0?Math.min(passageBudget,Math.max(1,Math.floor(loop.length/300))):0;

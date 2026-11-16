@@ -71,7 +71,7 @@ $('#app').innerHTML=`
       <div class="editor-section"><div class="section-label"><span><b>01</b> 绘制布局</span><div class="canvas-tools"><button class="tool" data-tool="draw" title="画笔：一笔画出闭合环线" aria-label="画笔工具"><i data-lucide="pencil"></i></button><button class="tool selected" data-tool="edit" title="拖动控制点调整路线" aria-label="控制点工具"><i data-lucide="mouse-pointer-2"></i></button><span></span><button class="tool" id="undo-button" title="撤销" aria-label="撤销"><i data-lucide="undo-2"></i></button><button class="tool" id="clear-button" title="清空画布" aria-label="清空画布"><i data-lucide="trash-2"></i></button></div></div>
       <div class="layer-tabs"><button class="selected" data-layer="route">路线控制点</button><button data-layer="height">地形高度层</button><label><input id="height-visible" type="checkbox" checked/>显示高度</label></div>
       <div id="reference-controls"></div><div class="canvas-wrap"><canvas id="reference-canvas" width="800" height="600" aria-hidden="true"></canvas><canvas id="track-canvas" aria-label="赛道绘制画布。使用画笔绘制，左键拖动控制点，右键删除控制点。" tabindex="0"></canvas><canvas id="height-canvas" aria-label="地形高度覆盖层。羽化笔刷绘制，Shift 或右键反向。"></canvas><span class="canvas-badge" id="layer-badge"><i data-lucide="sparkles"></i> 自动平滑</span><span class="canvas-corner">N ↑</span></div>
-      <div class="terrain-tools" id="terrain-tools" hidden><div class="brush-modes"><button class="selected" data-brush="raise">抬高 ＋</button><button data-brush="lower">压低 −</button><button data-brush="smooth">平滑</button><button data-brush="flatten">归零</button></div><label class="range-label" for="brush-radius"><span>羽化半径</span><output id="brush-radius-output">24 m</output></label><input id="brush-radius" type="range" min="12" max="70" value="24"/><label class="range-label" for="brush-strength"><span>高度速率</span><output id="brush-strength-output">4 m/s</output></label><input id="brush-strength" type="range" min="1" max="12" value="4"/><div class="terrain-actions"><button id="undo-height"><i data-lucide="undo-2"></i>撤销高度</button><span id="height-range">0.0 — 0.0 m</span><button id="clear-height">清空高度</button></div><p>按住涂抹，边缘自动羽化。Shift / 右键反向；修改后自动同步路面与碰撞。</p></div>
+      <div class="terrain-tools" id="terrain-tools" hidden><div class="brush-modes"><button class="selected" data-brush="raise">抬高 ＋</button><button data-brush="lower">压低 −</button><button data-brush="smooth">平滑</button><button data-brush="flatten">归零</button></div><label class="range-label" for="brush-radius"><span>羽化半径</span><output id="brush-radius-output">24 m</output></label><input id="brush-radius" type="range" min="12" max="70" value="24"/><label class="range-label" for="brush-strength"><span>高度速率</span><output id="brush-strength-output">4 m/s</output></label><input id="brush-strength" type="range" min="1" max="12" value="4"/><div class="terrain-actions"><button id="undo-height"><i data-lucide="undo-2"></i>撤销高度</button><span id="height-range">0.0 — 0.0 m</span><button id="clear-height">清空高度</button></div><p>按住涂抹，边缘自动羽化。Shift / 右键反向；修改后自动同步路面与碰撞。</p><div class="water-controls"><div class="water-controls-heading"><label for="water-enabled">水面</label><input id="water-enabled" type="checkbox" checked/></div><label class="water-level-row" for="water-level"><span>水位高度</span><input id="water-level" type="number" min="-12000" max="12000" step="0.001" value="-1"/><span>m</span></label><p>地形低于水位时自动出现水面。用压低笔刷挖出湖泊或海湾；水位随赛道一起保存。</p></div></div>
       <div class="canvas-legend"><span><b class="legend-dot straight"></b>直道</span><span><b class="legend-dot curve"></b>缓弯</span><span><b class="legend-dot hairpin"></b>急弯</span><span class="auto-close"><i data-lucide="check"></i>自动闭合</span></div>
       <p class="editor-status" id="editor-status">拖动控制点，微调你的走线。</p></div>
       <div class="editor-section settings-section"><div class="section-label"><span><b>02</b> 赛道设定</span><i data-lucide="settings-2"></i></div>
@@ -229,7 +229,24 @@ $('#new-button').addEventListener('click',()=>{$<HTMLSelectElement>('#circuit-se
 $('#clear-button').addEventListener('click',()=>$('#new-button').click());$('#undo-button').addEventListener('click',()=>editor.undo());
 $('#width-range').addEventListener('input',e=>{settings.width=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
 $('#smooth-range').addEventListener('input',e=>{settings.smoothness=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
-function updateTerrainControls(){if(!terrainPainter)return;terrainPainter.radius=terrainPainter.field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);$('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;$('#height-range').textContent=`${terrainPainter.field.min.toFixed(1)} — ${terrainPainter.field.max.toFixed(1)} m`;}
+function updateTerrainControls(){
+  if(!terrainPainter)return;
+  const field=terrainPainter.field,level=field.seaLevel,input=$<HTMLInputElement>('#water-level');
+  terrainPainter.radius=field.size*Number($<HTMLInputElement>('#brush-radius').value)/500;terrainPainter.strength=Number($<HTMLInputElement>('#brush-strength').value);
+  $('#brush-radius-output').textContent=`${Math.round(terrainPainter.radius)} m`;$('#brush-strength-output').textContent=`${terrainPainter.strength} m/s`;$('#height-range').textContent=`${field.min.toFixed(1)} — ${field.max.toFixed(1)} m`;
+  $<HTMLInputElement>('#water-enabled').checked=level!==null;input.disabled=level===null;
+  if(document.activeElement!==input)input.value=String(Math.round(field.defaultWaterLevel*1000)/1000);
+}
+function updateWater(){
+  if(!terrainPainter)return;
+  const enabled=$<HTMLInputElement>('#water-enabled').checked,input=$<HTMLInputElement>('#water-level'),level=input.valueAsNumber;
+  if(enabled&&(!Number.isFinite(level)||Math.abs(level)>12000))return;
+  terrainPainter.field.setWaterLevel(enabled?level:null);terrainPainter.onChange();terrainPainter.draw();
+}
+$<HTMLInputElement>('#water-enabled').addEventListener('change',updateWater);
+$<HTMLInputElement>('#water-level').addEventListener('input',updateWater);
+$<HTMLInputElement>('#water-level').addEventListener('change',()=>{updateWater();updateTerrainControls();});
+$<HTMLInputElement>('#water-level').addEventListener('blur',updateTerrainControls);
 document.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach(b=>b.addEventListener('click',()=>{const height=b.dataset.layer==='height';terrainPainter!.setActive(height);$('#terrain-tools').hidden=!height;document.querySelectorAll('[data-layer]').forEach(x=>x.classList.toggle('selected',x===b));$('#layer-badge').textContent=height?'羽化高度笔刷':'自动平滑';}));
 document.querySelectorAll<HTMLButtonElement>('[data-brush]').forEach(b=>b.addEventListener('click',()=>{terrainPainter!.mode=b.dataset.brush as BrushMode;document.querySelectorAll('[data-brush]').forEach(x=>x.classList.toggle('selected',x===b));}));
 function syncRangeFill(input:HTMLInputElement){
@@ -278,10 +295,11 @@ async function importedTerrain(data:TrackFile){
   const saved=data.terrain?parseTerrain(data.terrain):undefined;
   const circuit=CIRCUIT_LIBRARY.find(c=>c.id===data.route?.circuitId);
   if(!circuit||!data.route)return saved??TerrainField.around(data.points);
-  if(saved&&(data.route.terrainVersion===CIRCUIT_TERRAIN_VERSION||data.route.terrainEdited))return saved;
+  const preserveSaved=!!saved&&(data.route.terrainVersion===CIRCUIT_TERRAIN_VERSION||!!data.route.terrainEdited);
+  if(preserveSaved&&saved.datumM!==undefined)return saved;
   try{
-    const terrain=await circuitTerrain(circuit,data.route.scale,saved);
-    data.route={...data.route,terrainVersion:CIRCUIT_TERRAIN_VERSION,terrainEdited:terrain===saved};
+    const terrain=await circuitTerrain(circuit,data.route.scale,saved,preserveSaved);
+    data.route={...data.route,terrainVersion:CIRCUIT_TERRAIN_VERSION,terrainEdited:preserveSaved?data.route.terrainEdited:terrain===saved};
     return terrain;
   }catch(error){
     if(!saved)throw error;

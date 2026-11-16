@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeKart } from './kart';
 import { makeRB20 } from './rb20';
 import { KartPhysics } from './physics';
-import { bridgeHeight, curbGeometry, runoffGeometry, CURB_WIDTH, TRACK_SURFACE_HEIGHT, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, curbGeometry, runoffGeometry, curbWidth, TRACK_SURFACE_HEIGHT, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
 import { TyreSmoke } from './tyre-smoke';
 import { SceneAssets, surfaceUVs, disposeSceneGroup } from './scene-assets';
@@ -15,6 +15,8 @@ import {ContactShadow} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
 import {START_LIGHT_COUNT} from './start-signal';
 import {startGridSlots} from './start-grid';
+import {TerrainWater} from './terrain-water';
+import {coastalTerrain} from './coastal-terrain';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -60,6 +62,7 @@ export class GameScene {
   private contactShadow=new ContactShadow();
   private surfaceDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true});
   private startLightMaterials:THREE.MeshStandardMaterial[]=[];
+  private water:TerrainWater|null=null;
   onContextLost=()=>{};
   constructor(public container:HTMLElement,physics:KartPhysics){
     this.physics=physics;
@@ -210,6 +213,8 @@ export class GameScene {
   }
   private makeLandscape(){
     this.clearGroup(this.landscape);const f=this.terrain,n=f.resolution,positions:number[]=[],colors:number[]=[],indices:number[]=[],base=new THREE.Color(0xffffff),high=new THREE.Color(0xe6dfc9),low=new THREE.Color(0xdce7cc);
+    // Keep the complete shared heightfield below every paved surface. Water
+    // meets the terrain by depth, rather than deleting its supporting ground.
     for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=base.clone().lerp(h>=0?high:low,Math.min(.55,Math.abs(h)/70));color.multiplyScalar(.9+.1*Math.sin(wx*.025)*Math.cos(wz*.019));positions.push(wx,h-.025,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();surfaceUVs(geo,2);const mesh=new THREE.Mesh(geo,this.assets.grass);mesh.receiveShadow=true;this.landscape.add(mesh);
   }
@@ -218,7 +223,10 @@ export class GameScene {
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
     this.tyreSmoke.clear();this.slipDuration=[0,0];
-    this.track=track;this.terrain=terrain.refined().clone();this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);
+    if(this.water){this.scene.remove(this.water.group);this.clearGroup(this.water.group);}
+    const coastal=coastalTerrain(track,terrain);
+    this.track=track;this.terrain=coastal.field.clone();this.water=TerrainWater.forTerrain(this.terrain,coastal.quays,this.assets);if(this.water)this.scene.add(this.water.group);
+    this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);
     this.assets.setRoadWear(track);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
@@ -256,8 +264,9 @@ export class GameScene {
       const distances=track.length>2200?[150,100,50]:[75,50,25];
       for(const metres of distances){
         if(corner.approach<metres+8)continue;
-        const index=(corner.start-Math.round(metres/step)+n)%n,s=track.samples[index],offset=track.width/2+CURB_WIDTH+2;
+        const index=(corner.start-Math.round(metres/step)+n)%n,s=track.samples[index],offset=track.width/2+curbWidth(track.width)+2;
         const x=s.x+s.nx*offset*corner.side,z=s.z+s.nz*offset*corner.side,y=this.terrain.sample(x,z)+bridgeHeight(track,index);
+        if(this.water&&!this.water.allowsScenery({x,z},.7))continue;
         const p=new THREE.Vector3(x,y,z);if(placed.some(v=>v.distanceTo(p)<12))continue;placed.push(p);
         const board=new THREE.Group();board.position.copy(p);board.rotation.y=Math.atan2(-s.tx,-s.tz);this.scenery.add(board);
         const canvas=document.createElement('canvas');canvas.width=192;canvas.height=256;const c=canvas.getContext('2d')!;
@@ -272,7 +281,8 @@ export class GameScene {
   private addScenery(){
     this.treeLODs=[];this.detailLayers=[];
     const b=this.track.bounds;
-    const {trees,shrubs}=vegetationLayout(this.track);
+    const land=this.water?.allowsScenery??(()=>true);
+    const {trees,shrubs}=vegetationLayout(this.track,land);
     const dummy=new THREE.Object3D();
     const treeModels=['tree_small_02','pine_sapling_small'];
     if(treeModels.every(name=>this.assets.models.has(name)&&this.assets.models.has(`${name}-far`))){
@@ -299,27 +309,33 @@ export class GameScene {
     for(let variant=0;variant<3;variant++){const subset=trees.filter(t=>t.variant===variant),crowns=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(3.5,1),material([0x688969,0x779575,0x4f7660][variant]),subset.length);subset.forEach((t,i)=>{dummy.position.set(t.x,this.terrain.sample(t.x,t.z)+4.9*t.scale,t.z);dummy.rotation.set(0,0,0);dummy.scale.set(t.scale,t.scale*t.stretch,t.scale);dummy.updateMatrix();crowns.setMatrixAt(i,dummy.matrix);});crowns.castShadow=true;crowns.receiveShadow=true;this.scenery.add(crowns);}
     }
     // Paddock, pit awnings and a viewing stand beyond the outer track boundary.
-    const pitZ=b.maxZ+25;
-    this.box(this.scenery,-10,-.015,pitZ,110,.04,24,0xb9bcad);
-    this.box(this.scenery,-22,2.9,pitZ+5,72,5.8,10,0xdbddce);
-    this.box(this.scenery,-22,5.95,pitZ+5,74,.25,12,0x2d4948);
-    for(let i=0;i<7;i++){const x=-51+i*9.5;this.box(this.scenery,x,1.8,pitZ-.1,7.3,3.6,.12,0x3c5350);this.box(this.scenery,x,4.5,pitZ-1,8.6,.15,4.5,i%2?0xe9eadc:0xc5de85);}
-    const pitSign=this.sign('APEX  MOTORSPORT',24,2.8);pitSign.position.set(-22,this.terrain.sample(-22,pitZ)+4.25,pitZ-.06);pitSign.rotation.y=Math.PI;this.scenery.add(pitSign);
-    const viewing=new THREE.Group();viewing.position.set(b.maxX+32,this.terrain.sample(b.maxX+32,(b.minZ+b.maxZ)/2),(b.minZ+b.maxZ)/2);viewing.rotation.y=Math.PI/2;this.scenery.add(viewing);
-    for(let row=0;row<5;row++)this.box(viewing,0,.5+row*.65,row*1.3,28,.6,1.1,row%2?0x708780:0xb5bfa6);
-    this.box(viewing,0,5.5,2.5,30,.3,10,0x2f4944);
-    for(const x of [-13,13])this.box(viewing,x,2.7,3.5,.22,5.4,.22,0x536d64);
+    const pitZ=b.maxZ+25,bankClearance=1;
+    const dryPaddock=!this.water?.intersects(-65-bankClearance,50+bankClearance,pitZ-15-bankClearance,pitZ+25+bankClearance);
+    if(dryPaddock){
+      this.box(this.scenery,-10,-.015,pitZ,110,.04,24,0xb9bcad);
+      this.box(this.scenery,-22,2.9,pitZ+5,72,5.8,10,0xdbddce);
+      this.box(this.scenery,-22,5.95,pitZ+5,74,.25,12,0x2d4948);
+      for(let i=0;i<7;i++){const x=-51+i*9.5;this.box(this.scenery,x,1.8,pitZ-.1,7.3,3.6,.12,0x3c5350);this.box(this.scenery,x,4.5,pitZ-1,8.6,.15,4.5,i%2?0xe9eadc:0xc5de85);}
+      const pitSign=this.sign('APEX  MOTORSPORT',24,2.8);pitSign.position.set(-22,this.terrain.sample(-22,pitZ)+4.25,pitZ-.06);pitSign.rotation.y=Math.PI;this.scenery.add(pitSign);
+    }
+    if(!this.water?.intersects(b.maxX+19-bankClearance,b.maxX+40+bankClearance,(b.minZ+b.maxZ)/2-16-bankClearance,(b.minZ+b.maxZ)/2+16+bankClearance)){
+      const viewing=new THREE.Group();viewing.position.set(b.maxX+32,this.terrain.sample(b.maxX+32,(b.minZ+b.maxZ)/2),(b.minZ+b.maxZ)/2);viewing.rotation.y=Math.PI/2;this.scenery.add(viewing);
+      for(let row=0;row<5;row++)this.box(viewing,0,.5+row*.65,row*1.3,28,.6,1.1,row%2?0x708780:0xb5bfa6);
+      this.box(viewing,0,5.5,2.5,30,.3,10,0x2f4944);
+      for(const x of [-13,13])this.box(viewing,x,2.7,3.5,.22,5.4,.22,0x536d64);
+    }
     // Windsocks and sparse APEX flags give scale without visual clutter.
-    for(const x of [-58,-45,47]){
+    for(const x of dryPaddock?[-58,-45,47]:[]){
       this.box(this.scenery,x,5.4,pitZ-14,.13,10.8,.13,0x71877c);
       const flag=new THREE.Mesh(new THREE.PlaneGeometry(2.7,4.8),new THREE.MeshStandardMaterial({color:0xc3e978,side:THREE.DoubleSide,roughness:.9}));flag.position.set(x+1.4,this.terrain.sample(x,pitZ-14)+8,pitZ-14);this.scenery.add(flag);
     }
     // CC0 service vehicles and cones stay in the paddock, outside the racing surface.
     for(const [name,x,z,scale] of [['sedan-sports',-42,pitZ+17,1.8],['sedan-sports',-30,pitZ+17,1.8],['truck',12,pitZ+16,2.1],['cone',-55,pitZ-5,1.2],['cone',-43,pitZ-5,1.2],['cone',-31,pitZ-5,1.2],['cone',-19,pitZ-5,1.2]] as const){
       if(nearestOnTrack(this.track,{x,z}).distance<this.track.width/2+5)continue;
+      if(!land({x,z},3))continue;
       const prop=this.assets.clone(name);if(!prop)continue;prop.name=`CC0 ${name}`;prop.position.set(x,this.terrain.sample(x,z)+.035,z);prop.scale.setScalar(scale);prop.rotation.y=name==='truck'?Math.PI/2:Math.PI;this.scenery.add(prop);
     }
-    this.detailLayers=addTrackEnvironment(this.scenery,this.track,this.terrain,this.assets,shrubs);
+    this.detailLayers=addTrackEnvironment(this.scenery,this.track,this.terrain,this.assets,shrubs,land);
   }
   frameTrack(){
     if(!this.track)return;const b=this.track.bounds;const center=new THREE.Vector3((b.minX+b.maxX)/2,(this.terrain.min+this.terrain.max)/2,(b.minZ+b.maxZ)/2);
@@ -331,6 +347,7 @@ export class GameScene {
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
+    this.water?.update(this.time);
     const body=this.physics.body;this.kart.root.quaternion.copy(body.quaternion as any);this.target.set(0,this.physics.visualOffset,0).applyQuaternion(this.kart.root.quaternion);this.kart.root.position.copy(body.position as any).add(this.target);
     this.kart.steering.rotation.z=this.physics.telemetry.steering*this.physics.profile.steeringRatio;
     this.kart.updateDashboard?.(this.physics.telemetry.gear??0,this.physics.telemetry.rpm);

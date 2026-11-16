@@ -190,3 +190,53 @@
     padding: 9px 10px 10px;
   }
 }
+
+.water-controls {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #454940;
+}
+
+.water-controls-heading,
+.water-level-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.water-controls-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #d8dfcb;
+}
+
+.water-controls #water-enabled {
+  width: 16px;
+  height: 16px;
+  accent-color: #bdce79;
+}
+
+.water-level-row {
+  font-size: 11px;
+  color: #aeb7a2;
+}
+
+.water-level-row > input {
+  width: 94px;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 1px solid #69745b;
+  background: #172620;
+  color: #e0ebcb;
+  font: inherit;
+}
+
+.water-level-row > input:disabled {
+  opacity: .45;
+}
+
+.water-level-row > input:focus-visible {
+  outline: 2px solid #bdce79;
+  outline-offset: 2px;
+}

@@ -1,8 +1,11 @@
 import {racingLineOffsets,type RacingLineTrack} from './racing-line';
+import {runoffBoundary} from './runoff-boundary';
 import type {Point} from './track';
 
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
 const angle=(v:number)=>Math.atan2(Math.sin(v),Math.cos(v));
+// One generator for both materials: 1 is the baseline recovery envelope.
+const RUNOFF_AGGRESSIVENESS={asphalt:1,gravel:4.2} as const;
 
 /** Estimate a design speed and sweep recoverable driving errors around the
  * rubbered line. This runs when a circuit is built, never in the driving loop.
@@ -40,7 +43,7 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
   for(let seed=0;seed<n;seed+=stride){
     const ahead=wrap(seed+Math.max(1,Math.round(speed[seed]*.65/step)));
     if(Math.max(Math.abs(samples[seed].curvature),Math.abs(samples[ahead].curvature))<features.threshold*.65)continue;
-    // Preserve the original asphalt apron, including both driving errors.
+    // Both material profiles start from the same two driving-error scenarios.
     for(const [overspeed,reaction,deceleration] of [[1.12,.24,8],[1.25,.42,6.5]]){
       let x=points[seed].x,z=points[seed].z,yaw=heading[seed],v=speed[seed]*overspeed,reference=seed,progress=0,cursor=seed,travel=0;
       const travelLimit=Math.min(length*.18,v*reaction+v*v/(2*deceleration)+width);
@@ -82,12 +85,13 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
     }
     return sum/Math.max(.001,weight);
   });
-  features.runoffLeft=smooth(smooth(left));features.runoffRight=smooth(smooth(right));
-  // Add gravel beyond the existing asphalt rather than replacing part of it.
-  // The bounded band tapers with the apron and stays absent on bare straights.
-  const gravelOuter=(apron:number)=>apron+width*.8*Math.tanh(apron/width);
-  features.gravelLeft=features.runoffLeft.map(gravelOuter);
-  features.gravelRight=features.runoffRight.map(gravelOuter);
+  const baseLeft=smooth(smooth(left)),baseRight=smooth(smooth(right));
+  // Generate and fair both outlines identically, changing only aggression.
+  // The gravel floor keeps their shared material seam continuous.
+  features.runoffLeft=runoffBoundary(track,baseLeft,1,kerbWidth,RUNOFF_AGGRESSIVENESS.asphalt);
+  features.runoffRight=runoffBoundary(track,baseRight,-1,kerbWidth,RUNOFF_AGGRESSIVENESS.asphalt);
+  features.gravelLeft=runoffBoundary(track,baseLeft,1,kerbWidth,RUNOFF_AGGRESSIVENESS.gravel,features.runoffLeft);
+  features.gravelRight=runoffBoundary(track,baseRight,-1,kerbWidth,RUNOFF_AGGRESSIVENESS.gravel,features.runoffRight);
   for(let i=0;i<n;i++){
     const a=features.gravelLeft[i],b=features.gravelRight[i];features.runoffWidth[i]=Math.max(a,b);features.outer[i]=a>b?1:b>a?-1:0;
   }

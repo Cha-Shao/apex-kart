@@ -1,6 +1,6 @@
 import type { Point } from './track';
 
-export interface TerrainData { resolution:number; originX:number; originZ:number; size:number; heights:number[] }
+export interface TerrainData { resolution:number; originX:number; originZ:number; size:number; heights:number[];datumM?:number;waterLevel?:number|null;waterEnabled?:boolean }
 export type BrushMode='raise'|'lower'|'smooth'|'flatten';
 const refinedFields=new WeakMap<TerrainField,{revision:number;field:TerrainField}>();
 export class TerrainField {
@@ -9,13 +9,22 @@ export class TerrainField {
   readonly originZ:number;
   readonly size:number;
   readonly heights:Float32Array;
+  /** Start-point elevation in world metres; absent on hand-drawn terrain. */
+  datumM?:number;
+  /** Undefined uses the terrain default. Disabling keeps the last water level. */
+  waterLevel?:number;
+  waterEnabled:boolean;
   revision=0;
   constructor(data?:TerrainData){
     this.resolution=data?.resolution??129;this.size=data?.size??500;
     this.originX=data?.originX??-250;this.originZ=data?.originZ??-250;
     this.heights=data?Float32Array.from(data.heights):new Float32Array(this.resolution**2);
+    this.datumM=data?.datumM;this.waterLevel=data?.waterLevel??undefined;this.waterEnabled=data?.waterEnabled??(data?.waterLevel!==null);
   }
   get cellSize(){return this.size/(this.resolution-1);}
+  get defaultWaterLevel(){return this.waterLevel??(this.datumM===undefined?-1:-this.datumM);}
+  get seaLevel(){return this.waterEnabled?this.defaultWaterLevel:null;}
+  setWaterLevel(level:number|null){const enabled=level!==null;if(enabled===this.waterEnabled&&(level===null||level===this.waterLevel))return;this.waterEnabled=enabled;if(level!==null)this.waterLevel=level;this.revision++;}
   static around(points:Point[]){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),minX=Math.min(...xs),maxX=Math.max(...xs),minZ=Math.min(...zs),maxZ=Math.max(...zs);const size=Math.max(500,Math.max(maxX-minX,maxZ-minZ)*1.35+150);return new TerrainField({resolution:129,size,originX:(minX+maxX-size)/2,originZ:(minZ+maxZ-size)/2,heights:new Array(129**2).fill(0)});}
   clone(){return new TerrainField(this.toJSON());}
   /** Refine the editable source without changing its stored samples. Both the
@@ -36,9 +45,9 @@ export class TerrainField {
       for(let j=-1;j<=2;j++)rows.push(cubic(at(ix-1,iz+j),at(ix,iz+j),at(ix+1,iz+j),at(ix+2,iz+j),fx-ix));
       heights[z*n+x]=cubic(rows[0],rows[1],rows[2],rows[3],fz-iz);
     }
-    const field=new TerrainField({resolution:n,size:this.size,originX:this.originX,originZ:this.originZ,heights});refinedFields.set(this,{revision:this.revision,field});return field;
+    const field=new TerrainField({resolution:n,size:this.size,originX:this.originX,originZ:this.originZ,heights,datumM:this.datumM,waterLevel:this.waterLevel,waterEnabled:this.waterEnabled});refinedFields.set(this,{revision:this.revision,field});return field;
   }
-  toJSON():TerrainData{return {resolution:this.resolution,size:this.size,originX:this.originX,originZ:this.originZ,heights:Array.from(this.heights,h=>Math.round(h*1000)/1000)};}
+  toJSON():TerrainData{return {resolution:this.resolution,size:this.size,originX:this.originX,originZ:this.originZ,heights:Array.from(this.heights,h=>Math.round(h*1000)/1000),datumM:this.datumM,waterLevel:this.waterLevel,waterEnabled:this.waterEnabled};}
   get min(){let min=0;for(const h of this.heights)min=Math.min(min,h);return min;}
   get max(){let max=0;for(const h of this.heights)max=Math.max(max,h);return max;}
   sample(x:number,z:number){
@@ -69,6 +78,9 @@ export class TerrainField {
 export function parseTerrain(data:unknown):TerrainField{
   const v=data as TerrainData;
   if(!v||![65,129,257].includes(v.resolution)||!Number.isFinite(v.size)||v.size<100||v.size>50000||!Number.isFinite(v.originX)||!Number.isFinite(v.originZ)||Math.abs(v.originX)>25000||Math.abs(v.originZ)>25000||!Array.isArray(v.heights)||v.heights.length!==v.resolution**2||v.heights.some(h=>!Number.isFinite(h)||h<-1000||h>1000))throw new Error('高度图数据无效。');
+  if(v.datumM!==undefined&&(!Number.isFinite(v.datumM)||Math.abs(v.datumM)>12000))throw new Error('地形高程基准无效。');
+  if(v.waterLevel!==undefined&&v.waterLevel!==null&&(!Number.isFinite(v.waterLevel)||Math.abs(v.waterLevel)>12000))throw new Error('水位数据无效。');
+  if(v.waterEnabled!==undefined&&typeof v.waterEnabled!=='boolean')throw new Error('水面开关数据无效。');
   return new TerrainField(v);
 }
 
@@ -103,7 +115,8 @@ export class TerrainPainter {
   draw(){
     const c=this.ctx;c.clearRect(0,0,800,600);if(!this.visible&&!this.active)return;
     const f=this.field,n=f.resolution;this.map.width=n;this.map.height=n;const m=this.map.getContext('2d')!,img=m.createImageData(n,n);
-    for(let i=0;i<f.heights.length;i++){const h=f.heights[i],a=Math.min(.9,Math.abs(h)/15*1.2);img.data[i*4]=h>=0?235:76;img.data[i*4+1]=h>=0?164:175;img.data[i*4+2]=h>=0?78:225;img.data[i*4+3]=Math.round(a*255);}
+    const water=f.seaLevel;
+    for(let i=0;i<f.heights.length;i++){const h=f.heights[i],wet=water!==null&&h<water,a=wet?.35+Math.min(.4,(water-h)/12):Math.min(.9,Math.abs(h)/15*1.2);img.data[i*4]=wet?48:h>=0?235:76;img.data[i*4+1]=wet?153:h>=0?164:175;img.data[i*4+2]=wet?185:h>=0?78:225;img.data[i*4+3]=Math.round(a*255);}
     m.putImageData(img,0,0);const a=this.project({x:f.originX,z:f.originZ}),b=this.project({x:f.originX+f.size,z:f.originZ+f.size});c.imageSmoothingEnabled=true;c.drawImage(this.map,a.x,a.y,b.x-a.x,b.y-a.y);
     if(this.pointer&&this.active){const p=this.project(this.pointer),edge=this.project({x:this.pointer.x+this.radius,z:this.pointer.z}),r=Math.abs(edge.x-p.x),g=c.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#e7c78630');g.addColorStop(1,'#e7c78600');c.fillStyle=g;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.strokeStyle='#f1dfaa';c.lineWidth=1.7;c.setLineDash([6,5]);c.stroke();c.setLineDash([]);c.beginPath();c.arc(p.x,p.y,3,0,Math.PI*2);c.fillStyle='#fff2c7';c.fill();}
   }

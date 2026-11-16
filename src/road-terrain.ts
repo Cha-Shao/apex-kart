@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TerrainField} from './terrain';
-import {CURB_WIDTH,type Point} from './track';
+import {curbWidth,type Point} from './track';
 
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 const smoothstep=(value:number)=>{const t=clamp(value,0,1);return t*t*(3-2*t);};
@@ -74,9 +74,9 @@ export function roadTerrain(source:TerrainField,points:Point[],width:number,comp
   // Bake once at the resolution already consumed by both Three and Cannon.
   // Rasterising only segment bounds avoids a grid × whole-lap nearest search.
   const field=source.refined().clone(),n=field.resolution,cell=field.cellSize;
-  const core=width*.5+CURB_WIDTH+Math.max(compact?6:10,cell*Math.SQRT2);
+  const kerbWidth=curbWidth(width),core=width*.5+kerbWidth+Math.max(compact?6:10,cell*Math.SQRT2);
   const feather=Math.max(width*2,compact?16:32,cell*3),reachXZ=core+feather;
-  const reach2=reachXZ*reachXZ,weightRadius2=(width*.5+CURB_WIDTH)**2;
+  const reach2=reachXZ*reachXZ,weightRadius2=(width*.5+kerbWidth)**2;
   const targets=new Float64Array(n*n),weights=new Float64Array(n*n),nearest=new Float64Array(n*n).fill(Infinity);
   for(let i=0;i<count;i++){
     const j=(i+1)%count,a=samples[i],b=samples[j],dx=b.x-a.x,dz=b.z-a.z,span2=dx*dx+dz*dz;

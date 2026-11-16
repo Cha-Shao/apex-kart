@@ -13,6 +13,8 @@ export interface RunoffSample extends Point {nx:number;nz:number;radius:number}
 export type RunoffSurface='asphalt'|'gravel';
 export interface RunoffRegion extends FootprintPolygon {side:number;surface:RunoffSurface}
 export const CURB_WIDTH=1.88;
+// Scale narrow circuits by road width, including compact presets and drawings.
+export const curbWidth=(roadWidth:number)=>CURB_WIDTH*Math.min(1,roadWidth/12);
 // All visual track layers share a plane. Rendering resolves their priority;
 // millimetre height differences must not decide which surface covers another.
 export const TRACK_SURFACE_HEIGHT=.018;
@@ -59,6 +61,7 @@ function segmentsCross(a:Point,b:Point,c:Point,d:Point) {
 }
 export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptions={}):TrackData {
   if(!Number.isFinite(settings.width)||settings.width<6||settings.width>18)throw new Error('赛道宽度应在 6–18 米之间。');
+  const kerbWidth=curbWidth(settings.width);
   const controls=options.preserveLayout?raw.map(p=>({...p})):prepareStroke(raw);
   const curve=new THREE.CatmullRomCurve3((options.preserveLayout?controls:smoothClosed(controls,settings.smoothness)).map(p=>new THREE.Vector3(p.x,0,p.z)),true,'centripetal');
   curve.arcLengthDivisions=Math.max(4096,controls.length*4);
@@ -79,7 +82,7 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   });
   for(let k=0;k<2;k++){const c=samples.map((_,i)=>{let v=0;for(let j=-2;j<=2;j++)v+=samples[(i+j+n)%n].curvature;return v/5;});samples.forEach((s,i)=>s.curvature=c[i]);}
   const features=trackFeatures(samples,length);
-  applyRunoffProfile({samples,features,length,width:settings.width},CURB_WIDTH);
+  applyRunoffProfile({samples,features,length,width:settings.width},kerbWidth);
   samples.forEach(s=>s.kind=Math.abs(s.curvature)>features.threshold*(.034/.009)?'hairpin':Math.abs(s.curvature)>features.threshold?'curve':'straight');
   // A near-miss between distant sections must have space for both road edges.
   const neighborSkip=Math.ceil((settings.width*2.2)/step);
@@ -89,22 +92,23 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   for(let k=0;k<=n;k++){const s=samples[(k+Math.max(0,offset))%n];const turn=Math.sign(s.curvature);if(s.kind!=='straight'){if(!inCorner||turn!==sign){if(inCorner&&hasHairpin)hairpins++;corners++;hasHairpin=false;}inCorner=true;sign=turn;hasHairpin ||= s.kind==='hairpin';}else{if(inCorner&&hasHairpin)hairpins++;inCorner=false;hasHairpin=false;}}
   const xs=samples.map(s=>s.x),zs=samples.map(s=>s.z);
   const bridges:Bridge[]=crossings.slice(0,8).map(c=>({index:c.j,otherIndex:c.i,distance:c.j*step,height:5.2,halfLength:Math.min(length*.06,Math.max(42,settings.width*6))}));
-  const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]}));
+  const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:settings.width/2+kerbWidth+features.runoffWidth[i]}));
   const runoffRegions=makeRunoffRegions(samples,features,settings.width,runoff,bridges);
   return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)},visualCurve:curve};
 }
 
 export function roadFootprint(samples:TrackSample[],features:TrackFeatures,roadWidth:number){
-  const offset=(i:number,side:number)=>{const s=samples[i],w=roadWidth/2+CURB_WIDTH*(side>0?features.left:features.right)[i];return{x:s.x+s.nx*w*side,z:s.z+s.nz*w*side};};
+  const kerbWidth=curbWidth(roadWidth);
+  const offset=(i:number,side:number)=>{const s=samples[i],w=roadWidth/2+kerbWidth*(side>0?features.left:features.right)[i];return{x:s.x+s.nx*w*side,z:s.z+s.nz*w*side};};
   return samples.map((_,i)=>{const j=(i+1)%samples.length;return footprintPolygon([offset(i,1),offset(i,-1),offset(j,-1),offset(j,1)],i);});
 }
 
 export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,roadWidth:number,runoff:RunoffSample[],bridges:Bridge[]=[]){
-  const n=samples.length,runoffRegions:RunoffRegion[]=[],road=new FootprintIndex(roadFootprint(samples,features,roadWidth)),step=samples[1].distance-samples[0].distance,length=step*n;
+  const n=samples.length,runoffRegions:RunoffRegion[]=[],road=new FootprintIndex(roadFootprint(samples,features,roadWidth)),step=samples[1].distance-samples[0].distance,length=step*n,kerbWidth=curbWidth(roadWidth);
   const deck=samples.map((_,i)=>bridgeHeight({samples,bridges,length,width:roadWidth},i));
   const area=(p:Point[])=>Math.abs(p.reduce((sum,a,i)=>{const b=p[(i+1)%p.length];return sum+a.x*b.z-b.x*a.z;},0));
   for(const side of [-1,1]){
-    const roadEdge=(k:number)=>{const s=samples[k],offset=roadWidth/2+CURB_WIDTH*(side>0?features.left:features.right)[k];return{x:s.x+s.nx*offset*side,z:s.z+s.nz*offset*side};};
+    const roadEdge=(k:number)=>{const s=samples[k],offset=roadWidth/2+kerbWidth*(side>0?features.left:features.right)[k];return{x:s.x+s.nx*offset*side,z:s.z+s.nz*offset*side};};
     const clipWidths=(requested:number[])=>{
       // Limit each complete outward span before triangulating it. Clipping only
       // triangles can leave far-side lobes and diagonal ends behind another road.
@@ -196,7 +200,7 @@ function runoffSurfaceAt(track:TrackData,p:Point):RunoffSurface|undefined{
   return surface;
 }
 export function isOnAsphalt(track:TrackData,p:Point,roadDistance?:number,knownNear?:ReturnType<typeof nearestOnTrack>){
-  const near=knownNear??nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;const kerb=(near.signedDistance>=0?track.features.left:track.features.right)[near.index];if(kerb>0&&d<=track.width/2+CURB_WIDTH*kerb)return true;
+  const near=knownNear??nearestOnTrack(track,p),d=roadDistance??near.distance;if(d<=track.width/2)return true;const kerb=(near.signedDistance>=0?track.features.left:track.features.right)[near.index];if(kerb>0&&d<=track.width/2+curbWidth(track.width)*kerb)return true;
   return runoffSurfaceAt(track,p)==='asphalt';
 }
 /** Asphalt wins where aprons from neighbouring bends overlap gravel. */
@@ -220,7 +224,7 @@ export function runoffGeometry(track:TrackData,surface:(x:number,z:number)=>numb
 export function bridgeHeight(track:Pick<TrackData,'samples'|'bridges'|'length'|'width'>,index:number){let height=0;const distance=track.samples[index%track.samples.length].distance;for(const b of track.bridges){const delta=Math.abs(distance-b.distance),d=Math.min(delta,track.length-delta),plateau=track.width*1.5;if(d>b.halfLength)continue;const t=Math.max(0,Math.min(1,(b.halfLength-d)/(b.halfLength-plateau)));height=Math.max(height,b.height*t*t*(3-2*t));}return height;}
 
 export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number,grid?:TerrainGrid){
-  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],kerbTraffic:number[]=[],n=track.samples.length,line=racingLineOffsets(track);
+  const vertices:number[]=[],indices:number[]=[],colors:number[]=[],kerbUvs:number[]=[],kerbTraffic:number[]=[],n=track.samples.length,line=racingLineOffsets(track),kerbWidth=curbWidth(track.width);
   // Submit both edges in route order: later segments cover earlier kerbs.
   for(let i=0;i<n;i++)for(const side of [-1,1]){
     const mask=side>0?track.features.left:track.features.right;if(!mask[i]&&!mask[(i+1)%n])continue;
@@ -230,7 +234,7 @@ export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number
     for(let k=0;k<cuts.length-1;k++){
       const points:Point[]=[],t0=(cuts[k]-start)/(end-start),t1=(cuts[k+1]-start)/(end-start);
       for(const t of [t0,t1])for(const u of [0,1]){
-        const offset=side*(track.width/2+u*CURB_WIDTH*(mask[i]+(mask[j]-mask[i])*t));
+        const offset=side*(track.width/2+u*kerbWidth*(mask[i]+(mask[j]-mask[i])*t));
         points.push({x:a.x+(b.x-a.x)*t+(a.nx+(b.nx-a.nx)*t)*offset,z:a.z+(b.z-a.z)*t+(a.nz+(b.nz-a.nz)*t)*offset});
       }
       const [p,q,r,s]=points,spanX=b.x-a.x,spanZ=b.z-a.z,length2=spanX*spanX+spanZ*spanZ;
@@ -245,7 +249,7 @@ export function curbGeometry(track:TrackData,surface:(x:number,z:number)=>number
       for(let v=0;v<data.vertices.length;v+=3)colors.push(...(red?[.48,.012,.018]:[.78,.80,.77]));
       for(let v=0;v<data.vertices.length;v+=3){
         const x=data.vertices[v],z=data.vertices[v+2],t=Math.max(0,Math.min(1,((x-a.x)*spanX+(z-a.z)*spanZ)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t;
-        const lateral=((x-a.x-spanX*t)*nx+(z-a.z-spanZ*t)*nz)*side,localWidth=CURB_WIDTH*(mask[i]+(mask[j]-mask[i])*t);
+        const lateral=((x-a.x-spanX*t)*nx+(z-a.z-spanZ*t)*nz)*side,localWidth=kerbWidth*(mask[i]+(mask[j]-mask[i])*t);
         kerbUvs.push(start+(end-start)*t,Math.max(0,Math.min(1,(lateral-track.width/2)/Math.max(.001,localWidth))));
         // The outer tyre and a spread of slightly different laps approach
         // this edge most often at the apex, turn-in and corner exit.

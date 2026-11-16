@@ -6,8 +6,8 @@ export function trackFeatures(samples:TrackSample[],length:number):TrackFeatures
   const turn=samples.map(s=>Math.abs(s.curvature)>threshold?Math.sign(s.curvature):0);
   const left=new Array(n).fill(0),right=new Array(n).fill(0),runoffWidth=new Array(n).fill(0),outer=new Array(n).fill(0),corners:CornerFeature[]=[];
   const runoffLeft=new Array(n).fill(0),runoffRight=new Array(n).fill(0);
-  // Both envelopes measure outwards from the kerb; gravel extends beyond the
-  // original asphalt apron without changing its width or shape.
+  // Both envelopes measure outwards from the kerb and share one generator.
+  // The more aggressive gravel profile encloses the asphalt profile.
   const gravelLeft=new Array(n).fill(0),gravelRight=new Array(n).fill(0);
   const smooth=(v:number)=>{const t=Math.max(0,Math.min(1,v));return t*t*(3-2*t);};
   for(let i=0;i<n;i++)if(turn[i]){left[i]=right[i]=1;outer[i]=-turn[i];}

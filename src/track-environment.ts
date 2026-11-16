@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {CURB_WIDTH,isOnAsphalt,isOnGravel,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
+import {curbWidth,isOnAsphalt,isOnGravel,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
 import type {TerrainField} from './terrain';
 import type {SceneAssets} from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
@@ -10,25 +10,26 @@ import {FootprintIndex,polygonContains} from './track-footprint';
 
 export interface VegetationPoint extends Point {scale:number;stretch:number;variant:number}
 export interface DetailLayer {object:THREE.Object3D;center:THREE.Vector3;distance:number}
+type LandPlacement=(p:Point,margin?:number)=>boolean;
 type Placement={x:number;y:number;z:number;sx:number;sy:number;sz:number;ry?:number;color?:number};
 const seeded=(initial:number)=>{let seed=initial;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};};
-const edge=(track:TrackData,index:number,side:number)=>track.width*.5+CURB_WIDTH*(side>0?track.features.left:track.features.right)[index]+(side>0?track.features.gravelLeft:track.features.gravelRight)[index];
+const edge=(track:TrackData,index:number,side:number)=>track.width*.5+curbWidth(track.width)*(side>0?track.features.left:track.features.right)[index]+(side>0?track.features.gravelLeft:track.features.gravelRight)[index];
 const grassOnly=(track:TrackData,p:Point,margin:number)=>{if(Math.abs(p.x+12)<65&&p.z>track.bounds.maxZ+10&&p.z<track.bounds.maxZ+45)return false;const near=nearestOnTrack(track,p);return near.distance>track.width*.5+margin&&!isOnAsphalt(track,p,near.distance,near)&&!isOnGravel(track,p,near.distance,near);};
 
 /** Patches with clearings and understorey, rather than a uniform random field. */
-export function vegetationLayout(track:TrackData){
+export function vegetationLayout(track:TrackData,land:LandPlacement=()=>true){
   const random=seeded(7319),trees:VegetationPoint[]=[],shrubs:VegetationPoint[]=[],count=track.length>2000?24:14,n=track.samples.length;
   for(let cluster=0;cluster<count;cluster++){
     const i=Math.floor((cluster+.25+random()*.5)/count*n)%n,s=track.samples[i],side=cluster%2?1:-1,offset=edge(track,i,side)+24+random()*26,cx=s.x+s.nx*offset*side,cz=s.z+s.nz*offset*side,radius=12+random()*19;
     const population=7+Math.floor(random()*7);
     for(let k=0;k<population;k++){
       const angle=random()*Math.PI*2,r=Math.sqrt(random())*radius,x=cx+Math.cos(angle)*r,z=cz+Math.sin(angle)*r;
-      if(!grassOnly(track,{x,z},13)||trees.some(t=>(t.x-x)**2+(t.z-z)**2<10))continue;
+      if(!land({x,z},4)||!grassOnly(track,{x,z},13)||trees.some(t=>(t.x-x)**2+(t.z-z)**2<10))continue;
       trees.push({x,z,scale:.6+random()*.9,stretch:.85+random()*.5,variant:Math.floor(random()*3)});
     }
     for(let k=0;k<3;k++){
       const angle=random()*Math.PI*2,r=random()*radius*1.15,x=cx+Math.cos(angle)*r,z=cz+Math.sin(angle)*r;
-      if(grassOnly(track,{x,z},6))shrubs.push({x,z,scale:.22+random()*.2,stretch:.65+random()*.35,variant:0});
+      if(land({x,z},2)&&grassOnly(track,{x,z},6))shrubs.push({x,z,scale:.22+random()*.2,stretch:.65+random()*.35,variant:0});
     }
   }
   return {trees,shrubs};
@@ -43,7 +44,7 @@ function instances(group:THREE.Group,geometry:THREE.BufferGeometry,material:THRE
 function detail(layers:DetailLayer[],mesh:THREE.InstancedMesh|null,distance:number){if(mesh?.boundingSphere)layers.push({object:mesh,center:mesh.boundingSphere.center.clone(),distance});}
 function point(s:TrackSample,offset:number){return{x:s.x+s.nx*offset,z:s.z+s.nz*offset};}
 
-function soilEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets){
+function soilEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,land:LandPlacement){
   const dense=surfaceTrack(track),positions:number[]=[],colors:number[]=[],indices:number[]=[],n=dense.samples.length;
   const paved=new FootprintIndex([...roadFootprint(dense.samples,dense.features,dense.width),...dense.runoffRegions]);
   const retained=(p:Point)=>[...paved.query(p.x,p.x,p.z,p.z)].some(r=>polygonContains(r.points,p));
@@ -52,6 +53,7 @@ function soilEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets
     // A clipped-off runoff must not leave its old soil outline on the grass.
     if(!retained(point(a,(ea-.04)*side))||!retained(point(b,(eb-.04)*side)))continue;
     const p=point(a,(ea+.02)*side),q=point(a,(ea+width)*side),r=point(b,(eb+.02)*side),s=point(b,(eb+width)*side);
+    if(![p,q,r,s].every(p=>land(p,.4)))continue;
     const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+.007,terrain),base=positions.length/3;
     for(let k=0;k<data.vertices.length;k+=3){
       const x=data.vertices[k],z=data.vertices[k+2],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz||1))),e=ea+(eb-ea)*t;
@@ -77,13 +79,13 @@ function grassBlades(){
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setIndex(indices);geometry.computeVertexNormals();return geometry;
 }
 
-function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],layers:DetailLayer[]){
+function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],layers:DetailLayer[],land:LandPlacement){
   const random=seeded(813),grassCells=new Map<string,Placement[]>(),count=Math.min(300,Math.ceil(track.length/16)),n=track.samples.length;
   for(let i=0;i<count;i++){
     const index=Math.floor(i/count*n),s=track.samples[index];
     for(const side of [-1,1])for(let k=0;k<4;k++){
       const offset=(edge(track,index,side)+.3+random()*2.1)*side,x=s.x+s.nx*offset+s.tx*(random()-.5)*10,z=s.z+s.nz*offset+s.tz*(random()-.5)*10;
-      if(!grassOnly(track,{x,z},.1))continue;
+      if(!land({x,z},.4)||!grassOnly(track,{x,z},.1))continue;
       const key=`${Math.floor(x/70)},${Math.floor(z/70)}`,cell=grassCells.get(key)??[],scale=.65+random()*.65;
       cell.push({x,y:terrain.sample(x,z)-.015,z,sx:scale,sy:scale,sz:scale,ry:random()*Math.PI*2,color:[0x7e9348,0x6d8544,0x8a9a51][Math.floor(random()*3)]});grassCells.set(key,cell);
     }
@@ -102,8 +104,8 @@ function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
   });
 }
 
-function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,layers:DetailLayer[]){
-  const n=track.samples.length,safe=(p:Point)=>nearestOnTrack(track,p).distance>track.width*.5+2;
+function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,layers:DetailLayer[],land:LandPlacement){
+  const n=track.samples.length,safe=(p:Point)=>land(p,4)&&nearestOnTrack(track,p).distance>track.width*.5+2;
   addGuardrails(group,track,terrain,layers);
   // A few tyre stacks beyond corner runoff: no collider or invisible wall.
   const walls=track.features.corners.filter(c=>c.approach>30).slice(0,6);
@@ -117,6 +119,6 @@ function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,asset
   instances(group,new THREE.PlaneGeometry(1,1),boardMaterial,boards,'trackside sponsor boards',true);instances(group,new THREE.BoxGeometry(1,1,1),assets.alloy,boardPosts,'sponsor board posts',true);
 }
 
-export function addTrackEnvironment(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[]){
-  const layers:DetailLayer[]=[];soilEdges(group,track,terrain,assets);understorey(group,track,terrain,assets,shrubs,layers);facilities(group,track,terrain,assets,layers);return layers;
+export function addTrackEnvironment(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],land:LandPlacement=()=>true){
+  const layers:DetailLayer[]=[];soilEdges(group,track,terrain,assets,land);understorey(group,track,terrain,assets,shrubs,layers,land);facilities(group,track,terrain,assets,layers,land);return layers;
 }

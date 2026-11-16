@@ -1,6 +1,7 @@
 import * as CANNON from 'cannon-es';
-import { bridgeHeight, CURB_WIDTH, isOnAsphalt, isOnGravel, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, curbWidth, isOnAsphalt, isOnGravel, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
+import {coastalTerrain} from './coastal-terrain';
 import {VEHICLES,type VehicleId,type VehicleProfile} from './vehicles';
 import {AssistedVehicle} from './abs';
 import {firstGridPose} from './start-grid';
@@ -101,15 +102,15 @@ export class KartPhysics {
     for(const b of this.barriers)this.world.removeBody(b);this.barriers=[];
     if(this.terrainBody)this.world.removeBody(this.terrainBody);if(this.roadBody)this.world.removeBody(this.roadBody);this.roadBody=null;
     if(this.curbBody)this.world.removeBody(this.curbBody);this.curbBody=null;
-    this.terrain=terrain.refined().clone();const f=this.terrain,n=f.resolution;
+    this.terrain=coastalTerrain(track,terrain).field.clone();const f=this.terrain,n=f.resolution;
     const minimum=f.min;this.killY=minimum-40;this.safetyGround.position.y=minimum-50;this.safetyGround.updateAABB();
     const data=Array.from({length:n},(_,x)=>Array.from({length:n},(_,j)=>f.heights[(n-1-j)*n+x]));
     const heightfield=new CANNON.Heightfield(data,{elementSize:f.cellSize});
     this.terrainBody=new CANNON.Body({mass:0,shape:heightfield,material:this.groundMaterial,position:new CANNON.Vec3(f.originX,0,f.originZ+f.size)});this.terrainBody.quaternion.setFromEuler(-Math.PI/2,0,0);this.terrainBody.updateAABB();this.world.addBody(this.terrainBody);
     this.contactSolver.terrainBody=this.terrainBody;this.contactSolver.terrain=f;
     if(track.bridges.length){
-      const vertices:number[]=[],indices:number[]=[],count=track.samples.length;
-      for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const mask=(side>0?track.features.left:track.features.right)[i],offset=(track.width*.5+CURB_WIDTH*mask)*side;const x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
+      const vertices:number[]=[],indices:number[]=[],count=track.samples.length,kerbWidth=curbWidth(track.width);
+      for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const mask=(side>0?track.features.left:track.features.right)[i],offset=(track.width*.5+kerbWidth*mask)*side;const x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
       for(let i=0;i<count;i++){const a=i*2,b=((i+1)%count)*2;indices.push(a,a+1,b,a+1,b+1,b);}
       const mesh=new CANNON.Trimesh(vertices,indices);this.roadBody=new CANNON.Body({mass:0,shape:mesh,material:this.groundMaterial});this.roadBody.updateAABB();this.world.addBody(this.roadBody);
     }
@@ -156,7 +157,7 @@ export class KartPhysics {
   private updateTrackLimits(){
     // The white line is part of the track. A tyre still overlapping it is inside.
     // White stripe: centre width/2-.24 m, stripe half-width .065 m.
-    const whiteEdge=this.track.width/2-.175;
+    const whiteEdge=this.track.width/2-.175,kerbWidth=curbWidth(this.track.width);
     let allOutside=true,kerbLeft=0,kerbRight=0,grassLeft=0,grassRight=0;
     for(let i=0;i<4;i++){
       const wheel=this.vehicle.wheelInfos[i],contact=wheel.isInContact;
@@ -168,7 +169,7 @@ export class KartPhysics {
       const overlap=halfTread*Math.abs(this.trackLimitAxle.x*near.sample.nx+this.trackLimitAxle.z*near.sample.nz);
       if(near.distance-overlap<=whiteEdge+.005)allOutside=false;
       if(contact){
-        const mask=(near.signedDistance>=0?this.track.features.left:this.track.features.right)[near.index],inner=this.track.width/2,outer=inner+CURB_WIDTH*mask;
+        const mask=(near.signedDistance>=0?this.track.features.left:this.track.features.right)[near.index],inner=this.track.width/2,outer=inner+kerbWidth*mask;
         const coverage=Math.max(0,Math.min(near.distance+overlap,outer)-Math.max(near.distance-overlap,inner))/Math.max(.02,overlap*2);
         if(i%2===0)kerbLeft+=coverage*.5;else kerbRight+=coverage*.5;
         // Reuse the wheel contact lookup so grass audio follows each side,
