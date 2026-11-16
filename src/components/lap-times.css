@@ -1,6 +1,5 @@
 /* One aligned grid, with status badges outside the card's right edge. */
-.lap-result-row.lap-result-row--invalid { opacity: .48; }
-.lap-times-current.lap-times-current--invalid { opacity: .48; }
+.lap-result-row--invalid>.lap-result-number,.lap-result-row--invalid>.lap-result-time,.lap-result-row--invalid>.lap-result-sectors,.lap-times-current--invalid>output { opacity: .48; }
 .lap-result-row .lap-result-time { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 2px 0; line-height: 1; }
 .lap-result-time .lap-result-absolute { display:block; font-size: 9px; line-height: 1; font-weight: 400; opacity: .72; white-space: nowrap; }
 #lap-history.lap-history{left:30px;top:88px;width:340px;min-width:0;max-width:calc(100% - 92px);padding:0;border:0;background:transparent;overflow:visible;backdrop-filter:none}
@@ -16,6 +15,7 @@
 .lap-result-sectors>span{position:relative;text-align:right;min-width:0}.lap-result-sectors>span:not(:last-child):after{content:'/';position:absolute;right:-5px;color:#6c9196}
 .lap-result-badges{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:4px;width:max-content;z-index:3;pointer-events:auto}
 .lap-result-badge{display:grid;place-items:center;width:24px;height:26px;flex:none;color:#fff}.lap-result-badge--fastest{background:#8b36d4}.lap-result-badge--invalid{background:#c63b40}.lap-result-badge>svg{width:16px;height:18px}
+.lap-result-badge.lap-result-badge--invalid{display:flex;align-items:center;justify-content:center;gap:2px;width:auto;min-width:43px;padding:0 6px 0 2px}.lap-result-count{font:650 14px 'Bahnschrift',monospace;line-height:1;font-variant-numeric:tabular-nums}
 @media(max-width:700px){#lap-history.lap-history{left:16px;top:77px;width:310px;max-width:calc(100% - 88px);padding:0}.lap-times-current{min-height:72px;padding:15px 0 12px}.lap-times-current>output{font-size:39px}.lap-result-row{grid-template-columns:32px 88px minmax(0,1fr);column-gap:4px;min-height:35px}.lap-result-number{font-size:10px;padding-left:6px}.lap-result-time{font-size:18px}.lap-result-sectors{font-size:8px;gap:4px;padding-right:6px}.lap-result-sectors>span:not(:last-child):after{right:-4px}.lap-result-badges{left:calc(100% + 5px);gap:3px}.lap-result-badge{width:22px;height:24px}.lap-result-badge>svg{width:15px;height:16px}}
 /* Compact rows when ten laps must share the viewport with the input chart. */
 .lap-result-row{min-height:clamp(18px,calc(10dvh - 58px),38px)}.lap-result-time{font-size:clamp(13px,calc(3dvh - 5px),21px);line-height:1}.lap-result-number,.lap-result-sectors{line-height:1}

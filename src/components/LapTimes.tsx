@@ -6,6 +6,7 @@ interface LapTimesProps {
   currentTime:number;
   currentLap:number;
   currentInvalid:boolean;
+  currentInvalidCount:number;
   history:readonly LapRecord[];
 }
 
@@ -15,16 +16,16 @@ function lapTime(seconds:number){
   return `${String(minutes).padStart(2,'0')}:${String(Math.floor(remainder/1000)).padStart(2,'0')}.${String(remainder%1000).padStart(3,'0')}`;
 }
 
-function LapBadge({kind}:{kind:'fastest'|'invalid'}){
-  const label=kind==='fastest'?'最近十圈中最快的有效圈':'这一圈曾四轮完全驶出白线';
+function LapBadge({kind,count=0}:{kind:'fastest'|'invalid';count?:number}){
+  const label=kind==='fastest'?'最近十圈中最快的有效圈':`本圈违规 ${count} 次（抢跑或四轮完全驶出白线）`;
   return <span className={`lap-result-badge lap-result-badge--${kind}`} role="img" aria-label={label} title={label}>
     {kind==='fastest'
       ?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 2h4M12 10v4l2 1M18 7l2-2"/><circle cx="12" cy="14" r="8"/></svg>
-      :<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v9"/><circle cx="12" cy="19" r=".9" fill="currentColor" stroke="none"/></svg>}
+      :<><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v9"/><circle cx="12" cy="19" r=".9" fill="currentColor" stroke="none"/></svg><b className="lap-result-count" aria-hidden="true">{count}</b></>}
   </span>;
 }
 
-export function LapTimes({currentTime,currentLap,currentInvalid,history}:LapTimesProps){
+export function LapTimes({currentTime,currentLap,currentInvalid,currentInvalidCount,history}:LapTimesProps){
   const laps=history.slice(0,10);
   const validLaps=laps.filter(lap=>!lap.invalid);
   const fastestMilliseconds=validLaps.length?Math.min(...validLaps.map(lap=>Math.round(lap.time*1000))):Infinity;
@@ -34,7 +35,7 @@ export function LapTimes({currentTime,currentLap,currentInvalid,history}:LapTime
     <div className={`lap-times-current${currentInvalid?' lap-times-current--invalid':''}`}>
       <span className="lap-times-sr">当前第 {currentLap} 圈</span>
       <output aria-label="当前圈速">{lapTime(currentTime)}</output>
-      {currentInvalid&&<div className="lap-result-badges"><LapBadge kind="invalid"/></div>}
+      {currentInvalid&&<div className="lap-result-badges"><LapBadge kind="invalid" count={currentInvalidCount}/></div>}
     </div>
     {laps.length>0&&<div className="lap-results" role="table" aria-label="圈速、相对最快圈差值与三个赛段成绩">
       <div role="rowgroup">
@@ -54,7 +55,7 @@ export function LapTimes({currentTime,currentLap,currentInvalid,history}:LapTime
             </div>
             {(fastest||lap.invalid)&&<div className="lap-result-badges">
               {fastest&&<LapBadge kind="fastest"/>}
-              {lap.invalid&&<LapBadge kind="invalid"/>}
+              {lap.invalid&&<LapBadge kind="invalid" count={lap.invalidCount}/>}
             </div>}
           </div>;
         })}

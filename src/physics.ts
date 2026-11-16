@@ -32,6 +32,7 @@ export class KartPhysics {
   private gear=1;
   staged=false;
   trackLimitsExceeded=false;
+  trackLimitCount=0;
   private wheelRight=new CANNON.Vec3(1,0,0);
   private trackLimitAxle=new CANNON.Vec3();
   get visualOffset(){return this.profile.visualOffset;}
@@ -152,7 +153,7 @@ export class KartPhysics {
     for(let i=0;i<4;i++){this.vehicle.setBrake(0,i);this.vehicle.applyEngineForce(0,i);this.vehicle.setSteeringValue(0,i);this.vehicle.wheelInfos[i].rotation=0;}
   }
   setStaged(staged:boolean){this.staged=staged;this.body.type=staged?CANNON.Body.KINEMATIC:CANNON.Body.DYNAMIC;this.updateMassProperties();this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();this.body.aabbNeedsUpdate=true;this.body.wakeUp();}
-  clearTrackLimits(){this.trackLimitsExceeded=false;}
+  clearTrackLimits(){this.trackLimitsExceeded=false;this.trackLimitCount=0;}
   private updateTrackLimits(){
     // The white line is part of the track. A tyre still overlapping it is inside.
     // White stripe: centre width/2-.24 m, stripe half-width .065 m.
@@ -185,6 +186,9 @@ export class KartPhysics {
     this.telemetry.kerbLeft=Math.min(1,kerbLeft);this.telemetry.kerbRight=Math.min(1,kerbRight);
     this.telemetry.grassLeft=grassLeft;this.telemetry.grassRight=grassRight;
     this.telemetry.gravelLeft=gravelLeft;this.telemetry.gravelRight=gravelRight;
+    // Count excursions at the physics step so remaining outside is one event,
+    // and a brief excursion between rendered frames is still retained.
+    if(allOutside&&(!this.telemetry.fourWheelsOutside||!this.trackLimitsExceeded))this.trackLimitCount++;
     this.telemetry.fourWheelsOutside=allOutside;
     this.trackLimitsExceeded ||= allOutside;
   }
@@ -195,7 +199,7 @@ export class KartPhysics {
   }
   private fixedStep(dt:number){
     const b=this.body;
-    if(this.staged){this.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};for(let i=0;i<4;i++){this.vehicle.applyEngineForce(0,i);this.vehicle.setBrake(0,i);this.vehicle.setSteeringValue(0,i);}this.vehicle.updateVehicle(dt);this.telemetry.speed=0;this.telemetry.signedSpeed=0;this.telemetry.rpm=this.profile.idleRPM;return;}
+    if(this.staged){for(let i=0;i<4;i++){this.vehicle.applyEngineForce(0,i);this.vehicle.setBrake(0,i);this.vehicle.setSteeringValue(0,i);}this.vehicle.updateVehicle(dt);this.telemetry.speed=0;this.telemetry.signedSpeed=0;this.telemetry.rpm=this.profile.idleRPM;return;}
     b.quaternion.vmult(new CANNON.Vec3(0,0,-1),this.forward);b.quaternion.vmult(new CANNON.Vec3(1,0,0),this.lateral);
     b.vectorToLocalFrame(b.velocity,this.localVelocity);
     const speed=b.velocity.dot(this.forward),sideSpeed=b.velocity.dot(this.lateral),abs=Math.abs(speed);

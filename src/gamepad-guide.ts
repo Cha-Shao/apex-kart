@@ -68,6 +68,6 @@ export const gamepadGuide = `
     <dl class="gamepad-mobile-controls">
       ${controls.map(c=>`<div${c.action==='转向'?' class="pad-control-steering"':''}><dt>${c.key}</dt><dd>${c.action}${c.action==='手刹 / 确认'?'<small>上车、继续</small>':''}</dd></div>`).join('')}
     </dl>
-    <figcaption><span class="pad-connect-dot" aria-hidden="true"></span>连接后按任意键识别，再松开摇杆与扳机。<span class="pad-handbrake-note">手刹仅适用于卡丁车。</span></figcaption>
+    <figcaption><span class="pad-connect-dot" aria-hidden="true"></span>连接后按任意键识别，再松开摇杆与扳机。<span class="pad-handbrake-note">起步时按住 A / × 开始倒数，熄灯前松开或给油会判抢跑；行驶中手刹仅适用于卡丁车。</span></figcaption>
   </figure>
 </section>`;
