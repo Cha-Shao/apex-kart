@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import {makeRunoffRegions,type TrackData,type TrackSample,type RunoffSample} from './track';
+import {curbWidth,makeRunoffRegions,type TrackData,type TrackSample,type RunoffSample} from './track';
 import type {TerrainField} from './terrain';
 import {resampleRacingLine} from './racing-line';
+import {resampleRunoffBoundaries} from './runoff-boundary';
 const surfaceCache=new WeakMap<TrackData,Map<number,TrackData>>();
 
 /** Dense, smooth render sampling; timing and nearest-segment budgets stay fixed. */
@@ -24,13 +25,15 @@ export function surfaceTrack(track:TrackData,maxStep=1.2):TrackData{
   const features={...track.features};
   for(const key of ['left','right','outer'] as const)features[key]=Array.from({length:n},(_,i)=>interpolate(track.features[key],i/n,key==='left'||key==='right'));
   for(const key of ['runoffWidth','runoffLeft','runoffRight','gravelLeft','gravelRight'] as const)features[key]=Array.from({length:n},(_,i)=>interpolateWidth(track.features[key],i/n));
+  const kerbWidth=curbWidth(track.width);
+  resampleRunoffBoundaries(track,{...track,samples,features},kerbWidth);
   for(let i=0;i<n;i++){
     features.gravelLeft[i]=Math.max(features.runoffLeft[i],features.gravelLeft[i]);
     features.gravelRight[i]=Math.max(features.runoffRight[i],features.gravelRight[i]);
     features.runoffWidth[i]=Math.max(features.gravelLeft[i],features.gravelRight[i]);
+    features.outer[i]=features.gravelLeft[i]>features.gravelRight[i]?1:features.gravelRight[i]>features.gravelLeft[i]?-1:0;
   }
-  const radii=track.runoff.map(r=>r.radius);
-  const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:interpolateWidth(radii,i/n)}));
+  const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:track.width*.5+kerbWidth+features.runoffWidth[i]}));
   const bridges=track.bridges.map(b=>({...b,index:Math.round(b.index/original*n)%n,otherIndex:Math.round(b.otherIndex/original*n)%n}));
   const result={...track,samples,features,runoff,bridges,runoffRegions:makeRunoffRegions(samples,features,track.width,runoff,bridges)};
   resampleRacingLine(track,result);
