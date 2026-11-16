@@ -34,13 +34,17 @@ function waterNoise(kind:'ripple'|'swell'){
   const heightMean=heights.reduce((sum,value)=>sum+value,0)/heights.length;
   for(let z=0;z<size;z++)for(let x=0;x<size;x++){
     const dx=-(h(x+1,z)-h(x-1,z))*size/12,dz=-(h(x,z+1)-h(x,z-1))*size/12,length=Math.hypot(dx,dz,1),i=(z*size+x)*4;
-    pixels[i]=Math.round((dx/length*.5+.5)*255);pixels[i+1]=Math.round((dz/length*.5+.5)*255);pixels[i+2]=Math.round((1/length*.5+.5)*255);
+    const nx=dx/length,nz=dz/length;
+    pixels[i]=Math.round((nx*.5+.5)*255);pixels[i+1]=Math.round((nz*.5+.5)*255);
+    // B stores the second moment of the normal's horizontal components. Mips
+    // retain this energy when averaging RG towards a flat normal at distance.
+    pixels[i+2]=Math.round(Math.min(1,(nx*nx+nz*nz)*4)*255);
     // Centre height before variance-preserving blends to keep their mean level.
     pixels[i+3]=Math.round(THREE.MathUtils.clamp(.5+(heights[z*size+x]-heightMean)/amplitudeSum,0,1)*255);
   }
   const texture=new THREE.DataTexture(pixels,size,size);texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
   texture.magFilter=THREE.LinearFilter;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.generateMipmaps=true;
-  texture.name=`water-${kind}-normal-height`;texture.userData.sharedCC0=true;texture.needsUpdate=true;waterNoiseTextures.set(kind,texture);return texture;
+  texture.name=`water-${kind}-normal-height-moment`;texture.userData.sharedCC0=true;texture.needsUpdate=true;waterNoiseTextures.set(kind,texture);return texture;
 }
 
 // Blend three randomly transformed samples before a source tile can repeat.
@@ -67,7 +71,7 @@ const waterSamplingShader=/* glsl */`
     weights=max(weights,vec3(0.0));weights*=weights;
     weights/=dot(weights,vec3(1.0));
   }
-  vec3 waterNoiseTap(sampler2D tex,vec2 uv,vec2 drift,vec2 cell,vec2 dx,vec2 dy){
+  vec4 waterNoiseTap(sampler2D tex,vec2 uv,vec2 drift,vec2 cell,vec2 dx,vec2 dy){
     vec3 random=waterCellHash(cell);
     float turn=floor(random.z*4.0);
     vec2 axis=turn<1.0?vec2(1.0,0.0):turn<2.0?vec2(0.0,1.0):turn<3.0?vec2(-1.0,0.0):vec2(0.0,-1.0);
@@ -78,21 +82,24 @@ const waterSamplingShader=/* glsl */`
     #else
       vec4 sampleValue=textureLod(tex,sampleUv,0.0);
     #endif
-    // The encoded normal must follow the UV rotation back into the input axes.
-    return vec3(transpose(rotation)*(sampleValue.rg*2.0-1.0),sampleValue.a-0.5);
+    // Rotate the normal back and retain the variance lost to texture filtering.
+    vec2 slope=transpose(rotation)*(sampleValue.rg*2.0-1.0);
+    float variance=max(0.0,sampleValue.b*0.25-dot(slope,slope));
+    return vec4(slope,sampleValue.a-0.5,variance);
   }
-  vec3 waterNoiseSample(sampler2D tex,vec2 uv,vec2 drift){
+  vec4 waterNoiseSample(sampler2D tex,vec2 uv,vec2 drift){
     vec2 a,b,c;vec3 weights;waterNoiseCells(uv,a,b,c,weights);
     vec2 dx=vec2(0.0),dy=vec2(0.0);
     #ifdef WATER_FRAGMENT_SAMPLE
       dx=dFdx(uv);dy=dFdy(uv);
     #endif
-    vec3 value=waterNoiseTap(tex,uv,drift,a,dx,dy)*weights.x
-      +waterNoiseTap(tex,uv,drift,b,dx,dy)*weights.y
-      +waterNoiseTap(tex,uv,drift,c,dx,dy)*weights.z;
+    vec4 tapA=waterNoiseTap(tex,uv,drift,a,dx,dy),tapB=waterNoiseTap(tex,uv,drift,b,dx,dy),tapC=waterNoiseTap(tex,uv,drift,c,dx,dy);
+    vec3 value=tapA.xyz*weights.x+tapB.xyz*weights.y+tapC.xyz*weights.z;
+    float weightEnergy=dot(weights,weights);
+    float variance=dot(vec3(tapA.w,tapB.w,tapC.w),weights*weights)/weightEnergy;
     // Preserve wave energy through blends instead of outlining a grid of calm
     // patches where independent normals happen to average towards zero.
-    return value*inversesqrt(dot(weights,weights));
+    return vec4(value*inversesqrt(weightEnergy),variance);
   }
 `;
 
@@ -144,6 +151,7 @@ function waterShoreline(terrain:TerrainField,level:number){
 // and capillary normals are separate, as in Minecraft's water shader pipelines.
 const WATER_GRID_SEGMENTS=192;
 const WATER_GRID_CELL=.75;
+const WATER_ENVIRONMENT_REFLECTION_GAIN=.58;
 const waterDisplacementShader=/* glsl */`
   uniform float waterTime;
   uniform sampler2D waterSwellMap;
@@ -233,6 +241,7 @@ function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,te
       ${waterSamplingShader}
       uniform float waterTime;
       uniform sampler2D waterReflection;
+      uniform mat4 waterReflectionMatrix;
       uniform float waterReflectionReady;
       uniform sampler2D waterTerrain;
       uniform sampler2D waterShoreline;
@@ -257,36 +266,70 @@ function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,te
       vec2 waterGrid=clamp((waterPosition-waterTerrainGrid.xy)/waterTerrainGrid.z,vec2(0.0),vec2(waterTerrainGrid.w-1.0));
       float waterShoreDistance=max(0.0,texture2D(waterShoreline,(waterGrid+0.5)/waterTerrainGrid.w).r);
       vec2 waterUv=waterPosition/20.0;
-      vec2 rippleA=waterNoiseSample(normalMap,waterUv,vec2(waterTime*0.015,waterTime*0.009)).xy;
-      vec2 rippleB=waterNoiseSample(normalMap,mat2(0.6,-0.8,0.8,0.6)*waterUv*2.9,vec2(-waterTime*0.023,waterTime*0.019)).xy;
-      rippleB=vec2(0.6*rippleB.x-0.8*rippleB.y,0.8*rippleB.x+0.6*rippleB.y);
+      vec4 rippleA=waterNoiseSample(normalMap,waterUv,vec2(waterTime*0.015,waterTime*0.009));
+      vec4 rippleB=waterNoiseSample(normalMap,mat2(0.6,-0.8,0.8,0.6)*waterUv*2.9,vec2(-waterTime*0.023,waterTime*0.019));
+      rippleB.xy=vec2(0.6*rippleB.x-0.8*rippleB.y,0.8*rippleB.x+0.6*rippleB.y);
       float waterFootprint=length(fwidth(waterPosition));
       float waterDetail=1.0-smoothstep(0.18,1.8,waterFootprint);
-      // Retain restrained broad motion after real displacement fades out.
+      // Carry visible wave faces beyond the local geometry instead of leaving
+      // the horizon as a nearly horizontal reflecting sheet.
       vec2 waterMacroUv=waterPosition/42.0;
-      vec2 waterFarA=waterNoiseSample(waterSwellMap,waterMacroUv,vec2(waterTime*0.006,-waterTime*0.004)).xy;
-      vec2 waterFarB=waterNoiseSample(waterSwellMap,mat2(0.8,0.6,-0.6,0.8)*waterMacroUv*1.73+0.37,vec2(-waterTime*0.005,waterTime*0.007)).xy;
-      vec2 waterFarSlope=waterFarA*0.06+vec2(0.8*waterFarB.x+0.6*waterFarB.y,-0.6*waterFarB.x+0.8*waterFarB.y)*0.045;
-      waterFarSlope*=(1.0-waterSurface.w)*(1.0-smoothstep(2.0,12.0,waterFootprint));
+      vec4 waterFarA=waterNoiseSample(waterSwellMap,waterMacroUv,vec2(waterTime*0.006,-waterTime*0.004));
+      vec4 waterFarB=waterNoiseSample(waterSwellMap,mat2(0.8,0.6,-0.6,0.8)*waterMacroUv*1.73+0.37,vec2(-waterTime*0.005,waterTime*0.007));
+      waterFarB.xy=vec2(0.8*waterFarB.x+0.6*waterFarB.y,-0.6*waterFarB.x+0.8*waterFarB.y);
+      float waterBroadWeight=1.0-waterSurface.w;
+      float waterBroadDetail=1.0-smoothstep(1.5,10.0,waterFootprint);
+      vec2 waterFarSlope=(waterFarA.xy*0.38+waterFarB.xy*0.24)*waterBroadWeight*waterBroadDetail;
       float waterCoast=(1.0-smoothstep(2.0,11.0,waterShoreDistance))*smoothstep(0.0,0.06,waterDepth);
       // Restrain fine normals at grazing angles; geometry supplies the bank's
       // changing silhouette instead of increasingly distorted flat reflections.
       vec3 waterView=inverseTransformDirection(normalize(vViewPosition),viewMatrix);
       float waterGrazing=mix(0.4,1.0,smoothstep(0.02,0.5,abs(waterView.y)));
-      vec2 waterSlope=waterSurface.yz+waterFarSlope+(rippleA+rippleB*0.55)*(1.15+waterCoast*0.25)*waterDetail*waterGrazing;
+      float waterRippleStrength=(1.15+waterCoast*0.25)*waterGrazing;
+      vec2 waterSlope=waterSurface.yz+waterFarSlope+(rippleA.xy+rippleB.xy*0.55)*waterDetail*waterRippleStrength;
       normal=normalize(mat3(viewMatrix)*vec3(waterSlope.x,1.0,waterSlope.y));
-      roughnessFactor=clamp(roughnessFactor+waterCoast*0.03+(1.0-waterDetail)*0.045,0.0,1.0);
+      // Transfer filtered and deliberately faded detail into the specular lobe
+      // instead of turning the distant surface back into a perfect mirror.
+      float waterResolvedEnergy=dot(rippleA.xy,rippleA.xy)+0.3025*dot(rippleB.xy,rippleB.xy);
+      float waterMissingVariance=(rippleA.w+0.3025*rippleB.w+waterResolvedEnergy*(1.0-waterDetail*waterDetail))*waterRippleStrength*waterRippleStrength;
+      float waterBroadResolvedEnergy=0.1444*dot(waterFarA.xy,waterFarA.xy)+0.0576*dot(waterFarB.xy,waterFarB.xy);
+      waterMissingVariance+=(0.1444*waterFarA.w+0.0576*waterFarB.w+waterBroadResolvedEnergy*(1.0-waterBroadDetail*waterBroadDetail))*waterBroadWeight*waterBroadWeight;
+      vec2 waterSlopeDx=dFdx(waterSlope),waterSlopeDy=dFdy(waterSlope);
+      float waterPixelVariance=0.25*(dot(waterSlopeDx,waterSlopeDx)+dot(waterSlopeDy,waterSlopeDy));
+      float waterBaseRoughness=roughnessFactor+waterCoast*0.03;
+      roughnessFactor=clamp(pow(pow(waterBaseRoughness,4.0)+2.0*(waterMissingVariance+min(waterPixelVariance,0.04)),0.25),0.14,0.48);
       `).replace('#include <lights_fragment_maps>',`#include <lights_fragment_maps>
-      // Feed linear HDR scene reflection into the physical BRDF, which supplies
-      // water's Fresnel response and keeps the direct sun's moving highlights.
+      // Project the change in reflected ray direction. A small screen-space
+      // normal offset leaves recognisable clouds pasted over the wave pattern.
       vec2 waterReflectionUv=waterMirrorCoord.xy/max(waterMirrorCoord.w,0.0001);
-      vec2 waterDistortion=(mat3(viewMatrix)*vec3(waterSlope.x,0.0,waterSlope.y)).xy;
-      waterReflectionUv+=waterDistortion*(0.012+1.5/max(length(vViewPosition),8.0));
-      vec2 waterReflectionEdge=smoothstep(vec2(0.0),vec2(0.035),waterReflectionUv)
-        *(1.0-smoothstep(vec2(0.965),vec2(1.0),waterReflectionUv));
-      float waterReflectionWeight=waterReflectionReady*waterReflectionEdge.x*waterReflectionEdge.y;
-      vec3 waterReflectedLight=texture2D(waterReflection,clamp(waterReflectionUv,vec2(0.001),vec2(0.999))).rgb;
-      radiance=mix(radiance,waterReflectedLight,waterReflectionWeight);`)
+      vec3 waterReflectedRay=reflect(-waterView,normalize(vec3(waterSlope.x,1.0,waterSlope.y)));
+      vec3 waterFlatRay=reflect(-waterView,vec3(0.0,1.0,0.0));
+      // The plane's local XY maps to world X/-Z; directions have no translation.
+      vec4 waterRayCoord=waterReflectionMatrix*vec4(waterReflectedRay.x,-waterReflectedRay.z,waterReflectedRay.y,0.0);
+      vec4 waterFlatCoord=waterReflectionMatrix*vec4(waterFlatRay.x,-waterFlatRay.z,waterFlatRay.y,0.0);
+      waterReflectionUv+=waterRayCoord.xy/max(waterRayCoord.w,0.0001)-waterFlatCoord.xy/max(waterFlatCoord.w,0.0001);
+      float waterProjectionValid=step(0.0001,waterRayCoord.w)*step(0.0001,waterFlatCoord.w);
+      // Filter the planar capture with the same effective roughness as the BRDF.
+      // A small five-tap kernel softens mip boundaries without another scene pass.
+      vec2 waterReflectionSize=vec2(textureSize(waterReflection,0));
+      float waterMaxMip=log2(max(waterReflectionSize.x,waterReflectionSize.y));
+      float waterReflectionCone=material.roughness*material.roughness*mix(0.55,1.4,1.0-abs(waterView.y));
+      float waterReflectionLod=clamp(log2(max(1.0,waterReflectionCone*max(waterReflectionSize.x,waterReflectionSize.y))),0.0,waterMaxMip-2.0);
+      vec2 waterFilterRadius=exp2(waterReflectionLod)/waterReflectionSize*0.7;
+      vec2 waterReflectionMargin=vec2(0.02)+waterFilterRadius*1.5;
+      vec2 waterReflectionEdge=smoothstep(vec2(0.0),waterReflectionMargin,waterReflectionUv)
+        *(1.0-smoothstep(vec2(1.0)-waterReflectionMargin,vec2(1.0),waterReflectionUv));
+      float waterReflectionWeight=waterReflectionReady*waterProjectionValid*waterReflectionEdge.x*waterReflectionEdge.y;
+      vec2 waterReflectionSampleUv=clamp(waterReflectionUv,waterFilterRadius+0.001,vec2(0.999)-waterFilterRadius);
+      vec3 waterReflectedLight=textureLod(waterReflection,waterReflectionSampleUv,waterReflectionLod).rgb*0.4;
+      waterReflectedLight+=(textureLod(waterReflection,waterReflectionSampleUv+vec2(waterFilterRadius.x,0.0),waterReflectionLod).rgb
+        +textureLod(waterReflection,waterReflectionSampleUv-vec2(waterFilterRadius.x,0.0),waterReflectionLod).rgb
+        +textureLod(waterReflection,waterReflectionSampleUv+vec2(0.0,waterFilterRadius.y),waterReflectionLod).rgb
+        +textureLod(waterReflection,waterReflectionSampleUv-vec2(0.0,waterFilterRadius.y),waterReflectionLod).rgb)*0.15;
+      // Apply the same water-only gain to the planar capture and HDR fallback.
+      // Fresnel and direct sunlight stay in the physical BRDF, so the sun can
+      // still sparkle without the whole sky covering the water in pale light.
+      radiance=mix(radiance,waterReflectedLight,waterReflectionWeight)*${WATER_ENVIRONMENT_REFLECTION_GAIN};`)
       .replace('#include <transmission_fragment>',`
       // Use the refracted light's path through the actual water column. Near
       // the bank this tends to zero, exposing the ground without a painted rim.
@@ -302,7 +345,7 @@ function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,te
       vec3 waterFresnel=EnvironmentBRDF(normal,normalize(vViewPosition),material.specularColor,material.specularF90,material.roughness);
       totalDiffuse+=waterScatterLight*(vec3(1.0)-waterTransmittance)*(vec3(1.0)-waterFresnel);`);
   };
-  material.customProgramCacheKey=()=> 'terrain-water-stochastic-displacement-v7';return {material,detailCenter};
+  material.customProgramCacheKey=()=> 'terrain-water-balanced-reflection-v9';return {material,detailCenter};
 }
 
 /** Clip only for placement queries; the terrain itself is never cut away. */
@@ -333,6 +376,9 @@ export class TerrainWater {
     // The helper only captures the reflected view; the visible surface retains
     // physical lighting, depth occlusion, fog and a shared mean water level.
     this.reflection=new Reflector(geometry,{textureWidth:512,textureHeight:512,clipBias:.001,multisample:0});
+    // WebGLRenderer refreshes this mip chain after each reflection capture.
+    const reflectionTexture=this.reflection.getRenderTarget().texture;
+    reflectionTexture.generateMipmaps=true;reflectionTexture.minFilter=THREE.LinearMipmapLinearFilter;
     const reflectionMaterial=this.reflection.material as THREE.ShaderMaterial;
     const reflection:WaterReflectionUniforms={map:{value:this.reflection.getRenderTarget().texture},matrix:reflectionMaterial.uniforms.textureMatrix,ready:{value:0}};
     const {material,detailCenter}=waterMaterial(this.waveTime,reflection,terrain,level);
@@ -353,11 +399,15 @@ export class TerrainWater {
       this.reflection.matrixWorld.copy(mesh.matrixWorld);
       this.reflection.camera.layers.mask=camera.layers.mask;
       mesh.visible=false;
+      const backgroundIntensity=scene.backgroundIntensity;
       try{
+        // The visible sky uses a brighter exposure than scene.environment.
+        // Capture it at the lighting exposure to match HDR fallback radiance.
+        if(scene.environment)scene.backgroundIntensity=scene.environmentIntensity;
         this.reflection.onBeforeRender(renderer,scene,camera,geo,material,group);
         reflection.ready.value=1;lastReflection=this.clock.value;
         reflectedView.copy(camera.matrixWorld);reflectedProjection.copy(camera.projectionMatrix);
-      }finally{mesh.visible=true;}
+      }finally{scene.backgroundIntensity=backgroundIntensity;mesh.visible=true;}
     };
     this.group.add(mesh);
     if(quays.length&&assets)this.addQuays(quays,assets);
