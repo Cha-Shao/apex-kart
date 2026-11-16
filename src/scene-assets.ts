@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HDRLoader} from 'three/addons/loaders/HDRLoader.js';
-import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,paintedSurface,type RoadWearUniforms} from './surface-materials';
+import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,type RoadWearUniforms} from './surface-materials';
 import {roadWearTexture} from './road-wear';
 import type {TrackData} from './track';
 
@@ -35,6 +35,7 @@ export class SceneAssets {
   readonly grass:THREE.MeshStandardMaterial;
   readonly asphalt:THREE.MeshStandardMaterial;
   readonly runoff:THREE.MeshStandardMaterial;
+  readonly gravel:THREE.MeshStandardMaterial;
   readonly concrete:THREE.MeshStandardMaterial;
   readonly roof:THREE.MeshStandardMaterial;
   readonly paint=new THREE.MeshPhysicalMaterial({color:0xc4ed4c,metalness:.12,roughness:.27,clearcoat:1,clearcoatRoughness:.18});
@@ -61,6 +62,8 @@ export class SceneAssets {
     // Source macro relief is restrained; stone detail comes from the packed aggregate.
     this.asphalt=stochasticSurface(this.pbr('clean_asphalt',0xa5abb2,.9,1.05),2.1,.14,{roughnessCenter:.88,sourceRoughness:.66,roughnessContrast:1.1,roughnessMin:.76,roughnessMax:.99,specular:.7,aggregate:this.asphaltAggregate,aggregateStrength:1.25,ground:'asphalt',roadWear:this.roadWear});this.asphalt.envMapIntensity=.55;
     this.runoff=stochasticSurface(this.pbr('clean_asphalt',0xf2f3f4,.94,.9),2.1,.16,{roughnessCenter:.93,sourceRoughness:.66,roughnessContrast:.9,roughnessMin:.83,roughnessMax:1,specular:.55,aggregate:this.asphaltAggregate,aggregateStrength:1.05,albedoGain:1.15,ground:'asphalt'});this.runoff.envMapIntensity=.4;
+    this.gravel=gravelMaterial();
+    for(const texture of [this.gravel.map,this.gravel.normalMap,this.gravel.roughnessMap])if(texture)texture.anisotropy=this.anisotropy;
     this.concrete=this.pbr('concrete_layers_02',0xd9d9d4,.94,.45);
     this.roof=this.pbr('corrugated_iron',0x73808b,.65,.5);this.roof.metalness=.75;
     this.rubber=this.pbr('rubber_tiles',0x484b50,.98,.18,4);this.rubber.map=null;
@@ -68,7 +71,7 @@ export class SceneAssets {
     this.fabric=this.pbr('fabric_pattern_07',0x33505e,1,.22,5);this.fabric.map=null;
     this.carbon=this.pbr('fabric_pattern_07',0x15191e,.65,.16,9);this.carbon.map=null;
     this.kerb=paintedSurface(this.pbr('concrete_layers_02',0xffffff,.93,1.25));this.kerb.envMapIntensity=.35;this.kerb.vertexColors=true;this.kerb.name='painted-concrete-kerb';this.kerb.polygonOffset=true;this.kerb.polygonOffsetFactor=-4;this.kerb.polygonOffsetUnits=-4;
-    for(const material of [this.grass,this.asphalt,this.runoff,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb])material.userData.sharedCC0=true;
+    for(const material of [this.grass,this.asphalt,this.runoff,this.gravel,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb])material.userData.sharedCC0=true;
     const models=['tree_small_02','pine_sapling_small','tree_small_02-far','pine_sapling_small-far','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
       const gltf=await new GLTFLoader().loadAsync(`${BASE}${name}.glb`);
       gltf.scene.updateMatrixWorld(true);

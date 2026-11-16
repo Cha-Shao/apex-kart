@@ -40,7 +40,7 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
   for(let seed=0;seed<n;seed+=stride){
     const ahead=wrap(seed+Math.max(1,Math.round(speed[seed]*.65/step)));
     if(Math.max(Math.abs(samples[seed].curvature),Math.abs(samples[ahead].curvature))<features.threshold*.65)continue;
-    // Modest overspeed and a larger late-braking error, both with finite grip.
+    // Preserve the original asphalt apron, including both driving errors.
     for(const [overspeed,reaction,deceleration] of [[1.12,.24,8],[1.25,.42,6.5]]){
       let x=points[seed].x,z=points[seed].z,yaw=heading[seed],v=speed[seed]*overspeed,reference=seed,progress=0,cursor=seed,travel=0;
       const travelLimit=Math.min(length*.18,v*reaction+v*v/(2*deceleration)+width);
@@ -83,7 +83,12 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
     return sum/Math.max(.001,weight);
   });
   features.runoffLeft=smooth(smooth(left));features.runoffRight=smooth(smooth(right));
+  // Add gravel beyond the existing asphalt rather than replacing part of it.
+  // The bounded band tapers with the apron and stays absent on bare straights.
+  const gravelOuter=(apron:number)=>apron+width*.8*Math.tanh(apron/width);
+  features.gravelLeft=features.runoffLeft.map(gravelOuter);
+  features.gravelRight=features.runoffRight.map(gravelOuter);
   for(let i=0;i<n;i++){
-    const a=features.runoffLeft[i],b=features.runoffRight[i];features.runoffWidth[i]=Math.max(a,b);features.outer[i]=a>b?1:b>a?-1:0;
+    const a=features.gravelLeft[i],b=features.gravelRight[i];features.runoffWidth[i]=Math.max(a,b);features.outer[i]=a>b?1:b>a?-1:0;
   }
 }

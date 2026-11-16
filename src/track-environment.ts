@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {CURB_WIDTH,isOnAsphalt,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
+import {CURB_WIDTH,isOnAsphalt,isOnGravel,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
 import type {TerrainField} from './terrain';
 import type {SceneAssets} from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
@@ -12,8 +12,8 @@ export interface VegetationPoint extends Point {scale:number;stretch:number;vari
 export interface DetailLayer {object:THREE.Object3D;center:THREE.Vector3;distance:number}
 type Placement={x:number;y:number;z:number;sx:number;sy:number;sz:number;ry?:number;color?:number};
 const seeded=(initial:number)=>{let seed=initial;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};};
-const edge=(track:TrackData,index:number,side:number)=>track.width*.5+CURB_WIDTH*(side>0?track.features.left:track.features.right)[index]+(side>0?track.features.runoffLeft:track.features.runoffRight)[index];
-const grassOnly=(track:TrackData,p:Point,margin:number)=>{if(Math.abs(p.x+12)<65&&p.z>track.bounds.maxZ+10&&p.z<track.bounds.maxZ+45)return false;const near=nearestOnTrack(track,p);return near.distance>track.width*.5+margin&&!isOnAsphalt(track,p,near.distance,near);};
+const edge=(track:TrackData,index:number,side:number)=>track.width*.5+CURB_WIDTH*(side>0?track.features.left:track.features.right)[index]+(side>0?track.features.gravelLeft:track.features.gravelRight)[index];
+const grassOnly=(track:TrackData,p:Point,margin:number)=>{if(Math.abs(p.x+12)<65&&p.z>track.bounds.maxZ+10&&p.z<track.bounds.maxZ+45)return false;const near=nearestOnTrack(track,p);return near.distance>track.width*.5+margin&&!isOnAsphalt(track,p,near.distance,near)&&!isOnGravel(track,p,near.distance,near);};
 
 /** Patches with clearings and understorey, rather than a uniform random field. */
 export function vegetationLayout(track:TrackData){

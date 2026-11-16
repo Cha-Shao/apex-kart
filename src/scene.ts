@@ -10,7 +10,7 @@ import { TyreSmoke } from './tyre-smoke';
 import { SceneAssets, surfaceUVs, disposeSceneGroup } from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
 import {drapeTriangles} from './terrain-mesh';
-import {tyreGeometry} from './surface-materials';
+import {tyreGeometry,GRAVEL_TEXTURE_METRES} from './surface-materials';
 import {ContactShadow} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
 import {START_LIGHT_COUNT} from './start-signal';
@@ -18,7 +18,7 @@ import {startGridSlots} from './start-grid';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
-const SURFACE_ORDER={depth:10,runoff:20,kerb:30,white:40,asphalt:50,start:60} as const;
+const SURFACE_ORDER={depth:10,gravel:15,runoff:20,kerb:30,white:40,asphalt:50,start:60} as const;
 const ENVIRONMENT_FOG_DENSITY=.00076;
 export class GameScene {
   renderer:THREE.WebGLRenderer;
@@ -222,7 +222,9 @@ export class GameScene {
     this.assets.setRoadWear(track);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
-    const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,2.1);this.addSurface(new THREE.Mesh(runoffGeo,this.assets.runoff),SURFACE_ORDER.runoff,'track-runoff');
+    for(const type of ['gravel','asphalt'] as const){
+      const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain,type),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,type==='gravel'?GRAVEL_TEXTURE_METRES:2.1);this.addSurface(new THREE.Mesh(runoffGeo,type==='gravel'?this.assets.gravel:this.assets.runoff),type==='gravel'?SURFACE_ORDER.gravel:SURFACE_ORDER.runoff,`track-runoff-${type}`);
+    }
     // Asphalt has top priority, with exact slots for its own white lines. A
     // different road section can therefore cover a conflicting line or kerb.
     const lineWidth=.13,lineOffset=half-.24,lineInner=lineOffset-lineWidth*.5,lineOuter=lineOffset+lineWidth*.5,edgeWidth=half-lineOuter;

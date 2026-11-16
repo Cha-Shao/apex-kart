@@ -21,7 +21,7 @@ import { EngineAudio } from './audio';
 import { TerrainField, TerrainPainter, parseTerrain, type BrushMode } from './terrain';
 import { PedalHistory } from './telemetry';
 import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
-import {circuitTerrain} from './preset-terrain';
+import {circuitTerrain,CIRCUIT_TERRAIN_VERSION} from './preset-terrain';
 
 const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
 const icons=()=>createIcons({icons:iconSet,attrs:{'stroke-width':1.6}});
@@ -99,8 +99,8 @@ function toast(message:string){$('#toast').textContent=message;$('#toast').class
 let settings:TrackSettings={...DEFAULT_SETTINGS,width:12};
 let currentName=defaultCircuit.name,appliedPoints=defaultCircuit.nativePoints.map(p=>({...p})),appliedSettings={...settings};
 let draftRoute:RouteMetadata|undefined={circuitId:defaultCircuit.id,scale:'native'},appliedRoute:RouteMetadata|undefined=draftRoute,savedTerrain:TerrainField|undefined;
-let restoredTrack=false;
-const saved=safeStorage.get('apex-track-v1');if(saved)try{const file=parseTrackFile(saved);if(file.route?.circuitId==='nordschleife'){const replacement=CIRCUIT_LIBRARY.find(c=>c.id==='daytona-road')!;file.name=replacement.name;file.points=file.route.scale==='native'?replacement.nativePoints:replacement.compactPoints;file.route.circuitId=replacement.id;file.terrain=undefined;}currentName=file.name;settings={...file.settings,barriers:false};appliedPoints=file.points;appliedSettings={...settings};draftRoute=file.route;appliedRoute=file.route;savedTerrain=file.terrain?parseTerrain(file.terrain):undefined;restoredTrack=true;}catch{/* A corrupt browser save must not prevent the default circuit from loading. */}
+let restoredFile:TrackFile|undefined;
+const saved=safeStorage.get('apex-track-v1');if(saved)try{const file=parseTrackFile(saved);if(file.route?.circuitId==='nordschleife'){const replacement=CIRCUIT_LIBRARY.find(c=>c.id==='daytona-road')!;file.name=replacement.name;file.points=file.route.scale==='native'?replacement.nativePoints:replacement.compactPoints;file.route.circuitId=replacement.id;file.terrain=undefined;delete file.route.terrainVersion;delete file.route.terrainEdited;}currentName=file.name;settings={...file.settings,barriers:false};appliedPoints=file.points;appliedSettings={...settings};draftRoute=file.route;appliedRoute=file.route;savedTerrain=file.terrain?parseTerrain(file.terrain):undefined;restoredFile=file;}catch{/* A corrupt browser save must not prevent the default circuit from loading. */}
 let appliedTerrain=savedTerrain??TerrainField.around(appliedPoints);
 let currentTrack=buildTrack(appliedPoints,settings,appliedRoute?{preserveLayout:true,allowCrossings:true}:{});
 const editor=new TrackEditor($('#track-canvas'),settings);
@@ -166,6 +166,7 @@ terrainPainter=new TerrainPainter($('#height-canvas'),appliedTerrain.clone(),p=>
 let observedField=terrainPainter.field,observedRevision=observedField.revision;
 terrainPainter.onChange=()=>{
   const field=terrainPainter!.field;if(field===observedField&&field.revision===observedRevision)return;
+  if(draftRoute)draftRoute={...draftRoute,terrainEdited:true};
   observedField=field;observedRevision=field.revision;if(loadingElevation){elevationLoad++;loadingElevation=false;}dirty=true;updateTerrainControls();setStatus('正在同步地形高度…');scheduleDraft();
 };terrainPainter.setActive(false);updateTerrainControls();
 function updateTrackLabels(){
@@ -244,10 +245,10 @@ async function loadSelectedCircuit(){
   loadingElevation=true;if(previewTimer!==undefined){clearTimeout(previewTimer);previewTimer=undefined;}setStatus('正在载入赛道与地形高度…');
   try{
     const terrain=await circuitTerrain(c,scale);if(request!==elevationLoad)return;loadingElevation=false;
-    draftRoute={circuitId:c.id,scale};draftName=c.name;editor.options={preserveLayout:true,allowCrossings:true};settings.width=scale==='native'?12:6;editor.settings={...settings};
+    draftRoute={circuitId:c.id,scale,terrainVersion:CIRCUIT_TERRAIN_VERSION};draftName=c.name;editor.options={preserveLayout:true,allowCrossings:true};settings.width=scale==='native'?12:6;editor.settings={...settings};
     const points=scale==='native'?c.nativePoints:c.compactPoints;editor.setPoints(points);terrainPainter!.setField(terrain);syncSettings();updateTerrainControls();
     const heights=points.map(p=>terrain.sample(p.x,p.z)),relief=Math.max(...heights)-Math.min(...heights);
-    $('#library-info').textContent=c.country+' · '+(scale==='native'?'原尺寸':'等比缩放')+' · 路线高差约 '+relief.toFixed(1)+' m。含 DEM 近似地形，可用高度笔刷调整。';applyDraft();
+    $('#library-info').textContent=c.country+' · '+(scale==='native'?'原尺寸':'等比缩放')+' · 路线高差约 '+relief.toFixed(1)+' m。道路高程已平滑，可用高度笔刷调整。';applyDraft();
   }catch(error){if(request===elevationLoad){toast((error as Error).message);setStatus('高度加载失败，当前赛道已保留。',true);}}
   finally{if(request===elevationLoad)loadingElevation=false;}
 }
@@ -274,9 +275,18 @@ document.querySelectorAll<HTMLButtonElement>('[data-color]').forEach(b=>b.addEve
 function updateSoundButton(){const enabled=audio.enabled;$('#sound-button').innerHTML=`<i data-lucide="${enabled?'volume-2':'volume-x'}"></i>`;$('#sound-button').setAttribute('aria-label',enabled?'关闭引擎声音':'开启引擎声音');icons();}
 $('#sound-button').addEventListener('click',async()=>{soundTouched=true;try{await audio.toggle();updateSoundButton();toast(audio.enabled?(physics.profile.id==='rb20'?'V6 涡轮混动合成音效已开启':'200cc 单缸四冲程合成音效已开启'):'引擎声音已关闭');}catch{toast('当前浏览器暂时无法启动音频。');}});
 async function importedTerrain(data:TrackFile){
-  if(data.terrain)return parseTerrain(data.terrain);
+  const saved=data.terrain?parseTerrain(data.terrain):undefined;
   const circuit=CIRCUIT_LIBRARY.find(c=>c.id===data.route?.circuitId);
-  return circuit&&data.route?circuitTerrain(circuit,data.route.scale):TerrainField.around(data.points);
+  if(!circuit||!data.route)return saved??TerrainField.around(data.points);
+  if(saved&&(data.route.terrainVersion===CIRCUIT_TERRAIN_VERSION||data.route.terrainEdited))return saved;
+  try{
+    const terrain=await circuitTerrain(circuit,data.route.scale,saved);
+    data.route={...data.route,terrainVersion:CIRCUIT_TERRAIN_VERSION,terrainEdited:terrain===saved};
+    return terrain;
+  }catch(error){
+    if(!saved)throw error;
+    toast('暂时无法更新道路高程，已保留存档中的地形。');return saved;
+  }
 }
 function trackFile():TrackFile{return {version:2,name:draftName,points:editor.points,settings:{...settings,barriers:false},terrain:terrainPainter!.field.toJSON(),route:draftRoute};}
 $('#save-button').addEventListener('click',()=>{if(!draftTrack){toast('请先画出一条有效赛道。');return;}toast(safeStorage.set('apex-track-v1',JSON.stringify(trackFile()))?'赛道已保存到此浏览器，下次打开会自动恢复。':'浏览器存储不可用，请使用「导出 JSON」备份。');});
@@ -333,7 +343,7 @@ function updateLap(dt:number){
  if(complete){physics.clearTrackLimits();const lap=timing.history[0];if(!lap.invalid&&lap.time<bestTime){bestTime=lap.time;safeStorage.set(bestKey(),String(bestTime));toast('新最佳圈速 '+formatTime(bestTime));}}
  renderSectorTiming(progress);
 }
-function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=!physics.vehicle.absEnabled?'ABS 关闭':t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',physics.vehicle.absEnabled&&t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
+function updateHUD(){const t=physics.telemetry;pedals.draw($('#pedal-chart'));$('#throttle-percent').textContent=Math.round(physics.input.throttle*100)+'%';$('#brake-percent').textContent=Math.round(t.brakeApplied*100)+'%';$('#brake-demand-percent').textContent=Math.round(physics.input.brake*100)+'%';$('#abs-status').textContent=!physics.vehicle.absEnabled?'ABS 关闭':t.absActive?'ABS 限制中':'ABS 待命';$('#abs-status').classList.toggle('active',physics.vehicle.absEnabled&&t.absActive);$('#speed').textContent=String(Math.round(t.speed));$('#gear').textContent=t.signedSpeed<-1?'R':t.speed<1?'N':physics.profile.id==='rb20'?String(t.gear||1):'D';$('#rpm-label').textContent=`${Math.round(t.rpm/100)*100} RPM`;renderLapCard();$('#broadcast-lap').textContent=formatTime(lapTime);$('#surface-label').textContent=t.gravel?'砂石缓冲区 · 横滑阻力':t.offroad?'草地 · 抓地降低':t.runoff?'沥青缓冲区 · 正常抓地':'干燥沥青';$('#grip-label').textContent=t.offroad&&!t.gravel?'草地低抓地':t.grip<.65?'轮胎滑移':'正常抓地';$('#g-dot').style.transform=`translate(${Math.max(-22,Math.min(22,t.lateralG*15))}px,${Math.max(-22,Math.min(22,t.longitudinalG*15))}px)`;document.querySelectorAll<HTMLElement>('.rpm-bars span').forEach((b,i)=>b.classList.toggle('lit',i<Math.round(t.rpm/physics.profile.maxRPM*22)));}
 function cycleCamera(){const modes:CameraMode[]=['chase','top','cockpit','orbit'];setCamera(modes[(modes.indexOf(game?.mode||'chase')+1)%modes.length]);}
 function pollController(){
   controller.poll();
@@ -380,9 +390,13 @@ function animate(now:number){
 }
 async function initializeScene(){
   try{
+    if(restoredFile){
+      appliedTerrain=await importedTerrain(restoredFile);draftRoute=appliedRoute=restoredFile.route;
+      terrainPainter!.setField(appliedTerrain.clone());observedField=terrainPainter!.field;observedRevision=observedField.revision;updateTerrainControls();
+    }
     game=new GameScene($('#scene-container'),physics);physics.setTrack(currentTrack,settings,appliedTerrain);game.setTrack(currentTrack,settings,appliedTerrain);
     game.onContextLost=()=>{if(running&&!paused)pause();toast('图形上下文中断，请重新加载页面恢复 3D。');};
-    if(appliedRoute&&!restoredTrack)await loadSelectedCircuit();
+    if(appliedRoute&&!restoredFile)await loadSelectedCircuit();
     $('#loading-screen').classList.add('loaded');window.setTimeout(()=>$('#loading-screen').remove(),700);requestAnimationFrame(animate);
   }catch(error){$('#loading-screen').remove();$('#error-overlay').hidden=false;$('#error-message').textContent=`请使用支持 WebGL 2 的浏览器并开启硬件加速。${(error as Error).message}`;}
 }

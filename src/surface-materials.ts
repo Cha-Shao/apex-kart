@@ -216,6 +216,50 @@ export function asphaltAggregateTexture(){
   const texture=new THREE.DataTexture(data,size,size);texture.name='asphalt-aggregate-normal-roughness';texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.generateMipmaps=true;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.magFilter=THREE.LinearFilter;texture.needsUpdate=true;texture.userData.sharedCC0=true;return texture;
 }
 
+export const GRAVEL_TEXTURE_METRES=.6;
+/** Scatter overlapping crushed stones into a fine sand bed, rather than
+ * tessellating flat cells. The same millimetre heightfield drives the normals. */
+export function gravelMaterial(){
+  const size=1024,metres=GRAVEL_TEXTURE_METRES,heights=new Float32Array(size*size),grain=new Float32Array(size*size),colors=new Uint8Array(size*size*4),normals=new Uint8Array(size*size*4),roughness=new Uint8Array(size*size*4);
+  let seed=6217;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  const wrap=(v:number)=>(v%size+size)%size;
+  for(let pixel=0;pixel<heights.length;pixel++){
+    const noise=random(),shade=.9+noise*.16,index=pixel*4;grain[pixel]=noise;heights[pixel]=.0002+noise*.00045;
+    colors[index]=Math.round(190*shade);colors[index+1]=Math.round(174*shade);colors[index+2]=Math.round(146*shade);colors[index+3]=255;
+    roughness[index]=roughness[index+1]=roughness[index+2]=250;roughness[index+3]=255;
+  }
+  const scatter=(count:number,minRadius:number,maxRadius:number)=>{
+    for(let stone=0;stone<count;stone++){
+      const cx=random()*size,cy=random()*size,radius=minRadius+(maxRadius-minRadius)*random()**2,rx=radius/metres*size,ry=rx*(.48+random()*.5),angle=random()*Math.PI*2,c=Math.cos(angle),s=Math.sin(angle),reach=Math.ceil(rx+1);
+      const height=radius*(.45+random()*.4),tone=.78+random()*.4,warm=random(),tiltX=(random()-.5)*.5,tiltY=(random()-.5)*.5,r=.9+random()*.08;
+      const stoneColor=[(182+warm*25)*tone,(174+warm*8)*tone,(161-warm*22)*tone];
+      for(let y=Math.floor(cy)-reach;y<=Math.ceil(cy)+reach;y++)for(let x=Math.floor(cx)-reach;x<=Math.ceil(cx)+reach;x++){
+        const dx=x-cx,dy=y-cy,u=(dx*c+dy*s)/rx,v=(-dx*s+dy*c)/ry;
+        // Unequal angular faces, random sizes and overlapping footprints leave
+        // fine sand in the gaps instead of a continuous network of grout.
+        const d=Math.max(Math.hypot(u,v)*.88,Math.abs(u)*.9+Math.abs(v)*.32,Math.abs(v)*.92+Math.abs(u)*.24);
+        if(d>=1)continue;
+        const pixel=wrap(y)*size+wrap(x),bevel=Math.min(1,(1-d)*5),h=.00035+height*bevel*Math.max(.15,.8+tiltX*u+tiltY*v-d*.28)+grain[pixel]*.00016;
+        if(h<=heights[pixel])continue;heights[pixel]=h;
+        const index=pixel*4,shade=(.89+bevel*.11)*(.96+grain[pixel]*.08);
+        colors[index]=Math.min(255,Math.round(stoneColor[0]*shade));colors[index+1]=Math.min(255,Math.round(stoneColor[1]*shade));colors[index+2]=Math.min(255,Math.round(stoneColor[2]*shade));
+        roughness[index]=roughness[index+1]=roughness[index+2]=Math.round(r*255);
+      }
+    }
+  };
+  scatter(18000,.0005,.0015);scatter(10000,.0012,.0035);scatter(1400,.0025,.009);
+  const at=(x:number,y:number)=>heights[wrap(y)*size+wrap(x)],slope=1/(2*metres/size);
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const dx=(at(x+1,y)-at(x-1,y))*slope,dy=(at(x,y+1)-at(x,y-1))*slope,length=Math.hypot(dx,dy,1),i=(y*size+x)*4;
+    normals[i]=Math.round((.5-dx/length*.5)*255);normals[i+1]=Math.round((.5-dy/length*.5)*255);normals[i+2]=Math.round((.5+.5/length)*255);normals[i+3]=255;
+  }
+  const texture=(data:Uint8Array,name:string,color=false)=>{
+    const map=new THREE.DataTexture(data,size,size);map.name=`gravel-${name}`;map.colorSpace=color?THREE.SRGBColorSpace:THREE.NoColorSpace;map.wrapS=map.wrapT=THREE.RepeatWrapping;map.generateMipmaps=true;map.minFilter=THREE.LinearMipmapLinearFilter;map.magFilter=THREE.LinearFilter;map.needsUpdate=true;map.userData.sharedCC0=true;return map;
+  };
+  const material=stochasticSurface(new THREE.MeshStandardMaterial({map:texture(colors,'color',true),normalMap:texture(normals,'normal'),roughnessMap:texture(roughness,'roughness'),normalScale:new THREE.Vector2(1.2,1.2),roughness:.97,envMapIntensity:.25}),metres,.12,{roughnessCenter:.96,sourceRoughness:.96,roughnessContrast:.6,roughnessMin:.9,roughnessMax:1,specular:.5});
+  material.name='crushed-gravel-and-sand';return material;
+}
+
 /** Matte painted concrete with inner-edge grime and racing-line tyre deposits. */
 export function paintedSurface(material:THREE.MeshStandardMaterial){
   material.onBeforeCompile=shader=>{

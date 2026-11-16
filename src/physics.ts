@@ -1,13 +1,14 @@
 import * as CANNON from 'cannon-es';
-import { bridgeHeight, CURB_WIDTH, isOnAsphalt, nearestOnTrack, type TrackData, type TrackSettings } from './track';
+import { bridgeHeight, CURB_WIDTH, isOnAsphalt, isOnGravel, nearestOnTrack, type TrackData, type TrackSettings } from './track';
 import { TerrainField } from './terrain';
 import {VEHICLES,type VehicleId,type VehicleProfile} from './vehicles';
 import {AssistedVehicle} from './abs';
 import {firstGridPose} from './start-grid';
-import {guardrailBodies} from './guardrail-collision';
+import {GUARDRAIL_COLLISION_GROUP,guardrailBodies} from './guardrail-collision';
+import {SlidingContactSolver} from './sliding-contact';
 
 export interface DriveInput { throttle:number; brake:number; steer:number; handbrake:boolean; reverse:boolean }
-export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number;kerbLeft:number;kerbRight:number;grassLeft:number;grassRight:number }
+export interface Telemetry { speed:number; signedSpeed:number; rpm:number; steering:number; grip:number; offroad:boolean; lateralG:number; longitudinalG:number; grounded:number;runoff?:boolean;gravel?:boolean;fourWheelsOutside:boolean;gear?:number;brakeApplied:number;absActive:boolean;downforce:number;kerbLeft:number;kerbRight:number;grassLeft:number;grassRight:number }
 export class KartPhysics {
   world=new CANNON.World({gravity:new CANNON.Vec3(0,-9.81,0)});
   body:CANNON.Body;
@@ -19,7 +20,7 @@ export class KartPhysics {
   private safetyGround!:CANNON.Body;
   private groundMaterial=new CANNON.Material('ground');
   private guardrailMaterial=new CANNON.Material('guardrail');
-  private chassisContact!:CANNON.ContactMaterial;
+  private contactSolver:SlidingContactSolver;
   killY=-90;
   roadBody:CANNON.Body|null=null;
   curbBody:CANNON.Body|null=null;
@@ -40,17 +41,19 @@ export class KartPhysics {
   private accumulator=0;
   private forward=new CANNON.Vec3();
   private lateral=new CANNON.Vec3();
+  private gravelLateral=new CANNON.Vec3();
+  private gravelForce=new CANNON.Vec3();
   private localVelocity=new CANNON.Vec3();
   constructor(){
     this.world.broadphase=new CANNON.SAPBroadphase(this.world);
-    (this.world.solver as CANNON.GSSolver).iterations=12;
     this.world.defaultContactMaterial.friction=.45;
     this.world.defaultContactMaterial.restitution=.08;
     const groundMaterial=this.groundMaterial,chassisMaterial=new CANNON.Material('kart');
-    this.chassisContact=new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:.25,restitution:.1,contactEquationStiffness:1e7});this.world.addContactMaterial(this.chassisContact);
-    this.world.addContactMaterial(new CANNON.ContactMaterial(this.guardrailMaterial,chassisMaterial,{friction:.12,restitution:.03,contactEquationStiffness:1e8,contactEquationRelaxation:4}));
+    this.world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial,chassisMaterial,{friction:0,restitution:0,contactEquationStiffness:1e8}));
+    this.world.addContactMaterial(new CANNON.ContactMaterial(this.guardrailMaterial,chassisMaterial,{friction:0,restitution:0,contactEquationStiffness:1e8,contactEquationRelaxation:4}));
     const ground=new CANNON.Body({mass:0,shape:new CANNON.Plane(),material:groundMaterial,position:new CANNON.Vec3(0,-70,0)});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();this.world.addBody(ground);this.safetyGround=ground;
     this.body=new CANNON.Body({mass:165,material:chassisMaterial,linearDamping:.025,angularDamping:.4});
+    this.contactSolver=new SlidingContactSolver(this.body);this.world.solver=this.contactSolver;
     this.body.allowSleep=false;
     this.vehicle=new AssistedVehicle({chassisBody:this.body,indexRightAxis:0,indexUpAxis:1,indexForwardAxis:2});
     this.configureVehicle();
@@ -58,13 +61,21 @@ export class KartPhysics {
   }
   private configureVehicle(){
     this.vehicle.frontBrakeBias=this.profile.id==='rb20'?.58:.54;
-    // Hitbox contact should slide rather than grip the ground. Normal ground
-    // support and tyre friction come from the four suspension raycasts.
-    this.chassisContact.friction=this.profile.id==='rb20'?.05:.25;this.chassisContact.restitution=this.profile.id==='rb20'?0:.1;
     const spec=this.profile;this.body.mass=spec.mass;while(this.body.shapes.length)this.body.removeShape(this.body.shapes[0]);
-    // A single invisible collision proxy, independent of the rendered bodywork.
+    // Invisible collision proxies, independent of the rendered bodywork.
     const hitbox=spec.chassisRadius?new CANNON.Sphere(spec.chassisRadius):new CANNON.Box(new CANNON.Vec3(...spec.chassisHalf));
-    this.body.addShape(hitbox,new CANNON.Vec3(0,spec.chassisOffset,0));this.body.linearDamping=spec.id==='rb20'?.006:.025;
+    if(spec.chassisRadius)hitbox.collisionFilterMask=~GUARDRAIL_COLLISION_GROUP;
+    this.body.addShape(hitbox,new CANNON.Vec3(0,spec.chassisOffset,0));
+    if(spec.chassisRadius){
+      // Keep the compact terrain proxy, but give rail impacts a rounded nose
+      // and tail. A lone central sphere has no yaw lever to turn along a wall.
+      const span=Math.max(0,spec.chassisHalf[2]-spec.chassisRadius);
+      for(const z of [-span,-span*.5,0,span*.5,span]){
+        const railProxy=new CANNON.Sphere(spec.chassisRadius);railProxy.collisionFilterMask=GUARDRAIL_COLLISION_GROUP;
+        this.body.addShape(railProxy,new CANNON.Vec3(0,spec.chassisOffset,z));
+      }
+    }
+    this.body.linearDamping=spec.id==='rb20'?.006:.025;
     this.vehicle.wheelInfos.length=0;
     const wheel={radius:spec.wheelRadius,directionLocal:new CANNON.Vec3(0,-1,0),axleLocal:new CANNON.Vec3(-1,0,0),suspensionStiffness:spec.suspensionStiffness,suspensionRestLength:spec.suspensionRestLength,frictionSlip:spec.grip,dampingRelaxation:spec.id==='rb20'?10:5.8,dampingCompression:spec.id==='rb20'?7:4.4,maxSuspensionForce:spec.id==='rb20'?35000:17000,maxSuspensionTravel:spec.suspensionTravel,rollInfluence:.08,customSlidingRotationalSpeed:-25,useCustomSlidingRotationalSpeed:true};
     for(const [x,z] of [[-spec.frontHalfTrack,spec.frontZ],[spec.frontHalfTrack,spec.frontZ],[-spec.rearHalfTrack,spec.rearZ],[spec.rearHalfTrack,spec.rearZ]])this.vehicle.addWheel({...wheel,chassisConnectionPointLocal:new CANNON.Vec3(x,spec.connectionY,z),isFrontWheel:z<0});
@@ -76,7 +87,7 @@ export class KartPhysics {
   private updateMassProperties(){
     this.body.updateMassProperties();
     if(!this.profile.chassisRadius)return;
-    // Keep handling inertia independent of the smaller collision proxy, also
+    // Keep handling inertia independent of the rounded collision proxies, also
     // when staging/resetting recalculates Cannon's mass properties.
     CANNON.Box.calculateInertia(new CANNON.Vec3(...this.profile.chassisHalf),this.body.mass,this.body.inertia);
     const i=this.body.inertia;
@@ -95,6 +106,7 @@ export class KartPhysics {
     const data=Array.from({length:n},(_,x)=>Array.from({length:n},(_,j)=>f.heights[(n-1-j)*n+x]));
     const heightfield=new CANNON.Heightfield(data,{elementSize:f.cellSize});
     this.terrainBody=new CANNON.Body({mass:0,shape:heightfield,material:this.groundMaterial,position:new CANNON.Vec3(f.originX,0,f.originZ+f.size)});this.terrainBody.quaternion.setFromEuler(-Math.PI/2,0,0);this.terrainBody.updateAABB();this.world.addBody(this.terrainBody);
+    this.contactSolver.terrainBody=this.terrainBody;this.contactSolver.terrain=f;
     if(track.bridges.length){
       const vertices:number[]=[],indices:number[]=[],count=track.samples.length;
       for(let i=0;i<count;i++){const s=track.samples[i];for(const side of [-1,1]){const mask=(side>0?track.features.left:track.features.right)[i],offset=(track.width*.5+CURB_WIDTH*mask)*side;const x=s.x+s.nx*offset,z=s.z+s.nz*offset;vertices.push(x,f.sample(x,z)+bridgeHeight(track,i)+.018,z);}}
@@ -136,7 +148,7 @@ export class KartPhysics {
     this.body.previousPosition.copy(this.body.position);this.body.interpolatedPosition.copy(this.body.position);this.body.previousQuaternion.copy(this.body.quaternion);this.body.interpolatedQuaternion.copy(this.body.quaternion);
     this.body.aabbNeedsUpdate=true;this.body.wakeUp();this.steer=0;this.brake=0;this.gear=1;this.lastForward=0;this.lastLateral=0;this.accumulator=0;this.telemetry.speed=0;this.telemetry.signedSpeed=0;this.telemetry.rpm=this.profile.idleRPM;this.telemetry.gear=0;
     this.input={throttle:0,brake:0,steer:0,handbrake:false,reverse:false};
-    this.vehicle.resetABS();this.telemetry.brakeApplied=0;this.telemetry.absActive=false;this.telemetry.downforce=0;this.telemetry.kerbLeft=0;this.telemetry.kerbRight=0;this.telemetry.grassLeft=0;this.telemetry.grassRight=0;
+    this.vehicle.resetABS();this.telemetry.brakeApplied=0;this.telemetry.absActive=false;this.telemetry.downforce=0;this.telemetry.kerbLeft=0;this.telemetry.kerbRight=0;this.telemetry.grassLeft=0;this.telemetry.grassRight=0;this.telemetry.gravel=false;
     for(let i=0;i<4;i++){this.vehicle.setBrake(0,i);this.vehicle.applyEngineForce(0,i);this.vehicle.setSteeringValue(0,i);this.vehicle.wheelInfos[i].rotation=0;}
   }
   setStaged(staged:boolean){this.staged=staged;this.body.type=staged?CANNON.Body.KINEMATIC:CANNON.Body.DYNAMIC;this.updateMassProperties();this.body.velocity.setZero();this.body.angularVelocity.setZero();this.body.force.setZero();this.body.torque.setZero();this.body.aabbNeedsUpdate=true;this.body.wakeUp();}
@@ -160,8 +172,8 @@ export class KartPhysics {
         const coverage=Math.max(0,Math.min(near.distance+overlap,outer)-Math.max(near.distance-overlap,inner))/Math.max(.02,overlap*2);
         if(i%2===0)kerbLeft+=coverage*.5;else kerbRight+=coverage*.5;
         // Reuse the wheel contact lookup so grass audio follows each side,
-        // including two wheels off the road, but excludes kerbs and runoff.
-        if(wheel.raycastResult.hasHit&&wheel.raycastResult.body===this.terrainBody&&!isOnAsphalt(this.track,point,near.distance,near)){
+        // including two wheels off the road, but excludes kerbs and both runoffs.
+        if(wheel.raycastResult.hasHit&&wheel.raycastResult.body===this.terrainBody&&!isOnAsphalt(this.track,point,near.distance,near)&&!isOnGravel(this.track,point,near.distance,near)){
           if(i%2===0)grassLeft+=.5;else grassRight+=.5;
         }
       }
@@ -184,7 +196,9 @@ export class KartPhysics {
     const speed=b.velocity.dot(this.forward),sideSpeed=b.velocity.dot(this.lateral),abs=Math.abs(speed);
     const near=nearestOnTrack(this.track,{x:b.position.x,z:b.position.z});
     const offroad=!isOnAsphalt(this.track,b.position,near.distance,near);
+    const gravel=offroad&&isOnGravel(this.track,b.position,near.distance,near),grass=offroad&&!gravel;
     this.telemetry.runoff=!offroad&&near.distance>this.track.width/2;
+    this.telemetry.gravel=gravel;
     const spec=this.profile,isF1=spec.id==='rb20';
     const target=this.input.steer*((isF1?.40:.51)/(1+abs*(isF1?.024:.055)));
     this.steer+=(target-this.steer)*(1-Math.exp(-dt*7.5));
@@ -204,12 +218,23 @@ export class KartPhysics {
     this.vehicle.serviceImpulse=brakeImpulse;this.vehicle.demand=this.brake;this.vehicle.handbrake=handbrake;
     for(let i=0;i<4;i++){
       const w=this.vehicle.wheelInfos[i];
-      w.frictionSlip=(offroad?(isF1?.60:.78):spec.grip)*this.gripMultiplier*(handbrake&&i>=2?.42:1);
+      w.frictionSlip=(grass?(isF1?.60:.78):spec.grip)*this.gripMultiplier*(handbrake&&i>=2?.42:1);
       this.vehicle.applyEngineForce(i>=2?engine:0,i);
     }
     // Rolling resistance and quadratic air drag, in physical Newtons.
-    const drag=(abs*abs*spec.drag+(abs>.2?spec.rollingResistance:0))*(offroad?4.5:1);
+    const drag=(abs*abs*spec.drag+(abs>.2?spec.rollingResistance:0))*(grass?4.5:1);
     b.applyForce(this.forward.scale(-Math.sign(speed)*drag));
+    if(gravel&&this.vehicle.wheelInfos.some(w=>w.isInContact)){
+      // Resist sideways sliding only. This axis is perpendicular to forward,
+      // and applying at the centre of mass adds no steering/yaw torque.
+      const span=Math.hypot(this.forward.x,this.forward.z);
+      if(span>.001){
+        this.gravelLateral.set(-this.forward.z/span,0,this.forward.x/span);
+        const slide=b.velocity.dot(this.gravelLateral),corneringSlip=Math.max(.6,abs*.14);
+        const excess=Math.max(0,Math.abs(slide)-corneringSlip),deceleration=Math.min(9,excess*5);
+        this.gravelLateral.scale(-Math.sign(slide)*b.mass*deceleration,this.gravelForce);b.applyForce(this.gravelForce);
+      }
+    }
     if(downforce>0)b.applyForce(new CANNON.Vec3(0,-downforce,0));
     this.world.step(dt);
     this.telemetry.brakeApplied=this.vehicle.appliedBrake;this.telemetry.absActive=this.vehicle.absActive;this.telemetry.downforce=downforce;

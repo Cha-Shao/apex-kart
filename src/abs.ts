@@ -1,4 +1,5 @@
 import * as CANNON from 'cannon-es';
+import {GUARDRAIL_COLLISION_GROUP} from './guardrail-collision';
 
 /** Load-based ABS for Cannon's impulse tyres (which have no independent wheel inertia).
  * Run after this step's suspension solve, before friction: never estimate tyre slip
@@ -20,7 +21,34 @@ export class AssistedVehicle extends CANNON.RaycastVehicle {
   private groundVelocity=new CANNON.Vec3();
   private relative=new CANNON.Vec3();
   private normalPart=new CANNON.Vec3();
+  private rayTarget=new CANNON.Vec3();
   resetABS(){this.pressure.fill(1);this.serviceImpulse=0;this.demand=0;this.appliedBrake=0;this.absActive=false;}
+  castRay(wheel:CANNON.WheelInfo){
+    this.updateWheelTransformWorld(wheel);
+    const body=this.chassisBody,result=wheel.raycastResult,source=wheel.chassisConnectionPointWorld;
+    result.reset();result.groundObject=0;
+    source.addScaledVector(wheel.suspensionRestLength+wheel.radius,wheel.directionWorld,this.rayTarget);
+    // Search past unsuitable hits so a nearby rail cannot replace the ground
+    // with a sideways spring and a full-grip tyre contact.
+    this.world?.raycastAll(source,this.rayTarget,{skipBackfaces:true,collisionFilterMask:~GUARDRAIL_COLLISION_GROUP},hit=>{
+      if(hit.body===body||!hit.body||!hit.shape||hit.hitNormalWorld.y<.2||hit.hitNormalWorld.dot(wheel.directionWorld)>-.25)return;
+      if(result.hasHit&&hit.distance>=result.distance)return;
+      result.set(source,this.rayTarget,hit.hitNormalWorld,hit.hitPointWorld,hit.shape,hit.body,hit.distance);
+      result.hasHit=true;result.hitFaceIndex=hit.hitFaceIndex;
+    });
+    wheel.isInContact=result.hasHit;
+    if(!result.hasHit){
+      wheel.suspensionLength=wheel.suspensionRestLength;wheel.suspensionRelativeVelocity=0;wheel.clippedInvContactDotSuspension=1;
+      wheel.directionWorld.scale(-1,result.hitNormalWorld);return -1;
+    }
+    wheel.suspensionLength=Math.max(wheel.suspensionRestLength-wheel.maxSuspensionTravel,Math.min(wheel.suspensionRestLength+wheel.maxSuspensionTravel,result.distance-wheel.radius));
+    const inverse=-1/result.hitNormalWorld.dot(wheel.directionWorld);
+    body.getVelocityAtWorldPoint(result.hitPointWorld,this.velocity);
+    result.body!.getVelocityAtWorldPoint(result.hitPointWorld,this.groundVelocity);
+    this.velocity.vsub(this.groundVelocity,this.relative);
+    wheel.suspensionRelativeVelocity=result.hitNormalWorld.dot(this.relative)*inverse;wheel.clippedInvContactDotSuspension=inverse;
+    return result.distance;
+  }
   updateFriction(dt:number){
     const wheels=this.wheelInfos,body=this.chassisBody;
     if(body.invMass===0){this.resetABS();for(const wheel of wheels){wheel.brake=0;wheel.forwardImpulse=0;wheel.sideImpulse=0;wheel.skidInfo=1;}return;}

@@ -22,7 +22,12 @@ export function surfaceTrack(track:TrackData,maxStep=1.2):TrackData{
   });
   const features={...track.features};
   for(const key of ['left','right','outer'] as const)features[key]=Array.from({length:n},(_,i)=>interpolate(track.features[key],i/n,key==='left'||key==='right'));
-  for(const key of ['runoffWidth','runoffLeft','runoffRight'] as const)features[key]=Array.from({length:n},(_,i)=>interpolateWidth(track.features[key],i/n));
+  for(const key of ['runoffWidth','runoffLeft','runoffRight','gravelLeft','gravelRight'] as const)features[key]=Array.from({length:n},(_,i)=>interpolateWidth(track.features[key],i/n));
+  for(let i=0;i<n;i++){
+    features.gravelLeft[i]=Math.max(features.runoffLeft[i],features.gravelLeft[i]);
+    features.gravelRight[i]=Math.max(features.runoffRight[i],features.gravelRight[i]);
+    features.runoffWidth[i]=Math.max(features.gravelLeft[i],features.gravelRight[i]);
+  }
   const radii=track.runoff.map(r=>r.radius);
   const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:interpolateWidth(radii,i/n)}));
   const bridges=track.bridges.map(b=>({...b,index:Math.round(b.index/original*n)%n,otherIndex:Math.round(b.otherIndex/original*n)%n}));
