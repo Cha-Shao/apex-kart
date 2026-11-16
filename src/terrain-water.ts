@@ -12,63 +12,236 @@ interface WaterReflectionUniforms {
   ready:{value:number};
 }
 
-let rippleTexture:THREE.DataTexture|undefined;
-function waterRipples(){
-  if(rippleTexture)return rippleTexture;
+const waterNoiseTextures=new Map<'ripple'|'swell',THREE.DataTexture>();
+function waterNoise(kind:'ripple'|'swell'){
+  const cached=waterNoiseTextures.get(kind);if(cached)return cached;
   const size=256,heights=new Float32Array(size*size),pixels=new Uint8Array(size*size*4);
-  let seed=4179;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
-  // Periodic, multi-scale noise has no repeating parallel wave fronts. The
-  // normal texture is shared, mipmapped and sampled twice with different drift.
-  for(const [frequency,amplitude] of [[8,.12],[23,.035],[61,.009]]){
+  let seed=kind==='ripple'?4179:8231;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  // Independent broad relief and fine capillary normals, with periodic edges.
+  // Alpha carries height noise for breaking up the shoreline wave fronts.
+  const bands=kind==='ripple'?[[8,.12],[23,.035],[61,.009]]:[[3,.6],[7,.26],[15,.1]];
+  const amplitudeSum=bands.reduce((sum,band)=>sum+band[1],0);
+  for(const [frequency,amplitude] of bands){
     const lattice=Float32Array.from({length:frequency*frequency},random);
     const at=(x:number,z:number)=>lattice[((z+frequency)%frequency)*frequency+(x+frequency)%frequency];
     for(let z=0;z<size;z++)for(let x=0;x<size;x++){
       const u=x/size*frequency,v=z/size*frequency,ix=Math.floor(u),iz=Math.floor(v),tx=u-ix,tz=v-iz;
-      const sx=tx*tx*(3-2*tx),sz=tz*tz*(3-2*tz);
+      const sx=tx*tx*tx*(tx*(tx*6-15)+10),sz=tz*tz*tz*(tz*(tz*6-15)+10);
       heights[z*size+x]+=((at(ix,iz)*(1-sx)+at(ix+1,iz)*sx)*(1-sz)+(at(ix,iz+1)*(1-sx)+at(ix+1,iz+1)*sx)*sz)*amplitude;
     }
   }
   const h=(x:number,z:number)=>heights[((z+size)%size)*size+(x+size)%size];
+  const heightMean=heights.reduce((sum,value)=>sum+value,0)/heights.length;
   for(let z=0;z<size;z++)for(let x=0;x<size;x++){
     const dx=-(h(x+1,z)-h(x-1,z))*size/12,dz=-(h(x,z+1)-h(x,z-1))*size/12,length=Math.hypot(dx,dz,1),i=(z*size+x)*4;
-    pixels[i]=Math.round((dx/length*.5+.5)*255);pixels[i+1]=Math.round((dz/length*.5+.5)*255);pixels[i+2]=Math.round((1/length*.5+.5)*255);pixels[i+3]=255;
+    pixels[i]=Math.round((dx/length*.5+.5)*255);pixels[i+1]=Math.round((dz/length*.5+.5)*255);pixels[i+2]=Math.round((1/length*.5+.5)*255);
+    // Centre height before variance-preserving blends to keep their mean level.
+    pixels[i+3]=Math.round(THREE.MathUtils.clamp(.5+(heights[z*size+x]-heightMean)/amplitudeSum,0,1)*255);
   }
   const texture=new THREE.DataTexture(pixels,size,size);texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
   texture.magFilter=THREE.LinearFilter;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.generateMipmaps=true;
-  texture.userData.sharedCC0=true;texture.needsUpdate=true;rippleTexture=texture;return texture;
+  texture.name=`water-${kind}-normal-height`;texture.userData.sharedCC0=true;texture.needsUpdate=true;waterNoiseTextures.set(kind,texture);return texture;
 }
+
+// Blend three randomly transformed samples before a source tile can repeat.
+// Cells stay anchored to world coordinates while the waves scroll within them.
+// Both shader stages share the same height field; explicit fragment gradients
+// keep random offsets out of mip selection at cell boundaries.
+const waterSamplingShader=/* glsl */`
+  vec3 waterCellHash(vec2 cell){
+    vec3 p=fract(vec3(cell.x,cell.y,cell.x+cell.y)*vec3(0.1031,0.11369,0.13787));
+    p+=dot(p,p.zxy+19.19);
+    return fract(vec3((p.x+p.y)*p.z,(p.y+p.z)*p.x,(p.z+p.x)*p.y));
+  }
+  void waterNoiseCells(vec2 uv,out vec2 a,out vec2 b,out vec2 c,out vec3 weights){
+    vec2 skew=mat2(1.0,0.0,-0.577350269,1.154700538)*(uv*1.85);
+    vec2 cell=floor(skew),f=fract(skew);
+    float third=1.0-f.x-f.y;
+    if(third>0.0){
+      a=cell;b=cell+vec2(0.0,1.0);c=cell+vec2(1.0,0.0);
+      weights=vec3(third,f.y,f.x);
+    }else{
+      a=cell+vec2(1.0);b=cell+vec2(1.0,0.0);c=cell+vec2(0.0,1.0);
+      weights=vec3(-third,1.0-f.y,1.0-f.x);
+    }
+    weights=max(weights,vec3(0.0));weights*=weights;
+    weights/=dot(weights,vec3(1.0));
+  }
+  vec3 waterNoiseTap(sampler2D tex,vec2 uv,vec2 drift,vec2 cell,vec2 dx,vec2 dy){
+    vec3 random=waterCellHash(cell);
+    float turn=floor(random.z*4.0);
+    vec2 axis=turn<1.0?vec2(1.0,0.0):turn<2.0?vec2(0.0,1.0):turn<3.0?vec2(-1.0,0.0):vec2(0.0,-1.0);
+    mat2 rotation=mat2(axis.x,axis.y,-axis.y,axis.x);
+    vec2 sampleUv=rotation*(uv+drift)+random.xy;
+    #ifdef WATER_FRAGMENT_SAMPLE
+      vec4 sampleValue=textureGrad(tex,sampleUv,rotation*dx,rotation*dy);
+    #else
+      vec4 sampleValue=textureLod(tex,sampleUv,0.0);
+    #endif
+    // The encoded normal must follow the UV rotation back into the input axes.
+    return vec3(transpose(rotation)*(sampleValue.rg*2.0-1.0),sampleValue.a-0.5);
+  }
+  vec3 waterNoiseSample(sampler2D tex,vec2 uv,vec2 drift){
+    vec2 a,b,c;vec3 weights;waterNoiseCells(uv,a,b,c,weights);
+    vec2 dx=vec2(0.0),dy=vec2(0.0);
+    #ifdef WATER_FRAGMENT_SAMPLE
+      dx=dFdx(uv);dy=dFdy(uv);
+    #endif
+    vec3 value=waterNoiseTap(tex,uv,drift,a,dx,dy)*weights.x
+      +waterNoiseTap(tex,uv,drift,b,dx,dy)*weights.y
+      +waterNoiseTap(tex,uv,drift,c,dx,dy)*weights.z;
+    // Preserve wave energy through blends instead of outlining a grid of calm
+    // patches where independent normals happen to average towards zero.
+    return value*inversesqrt(dot(weights,weights));
+  }
+`;
+
+/** Signed distance to shoreline crossings in the ground's actual triangles.
+ * This also locates the shore on flat-bottom bays without a bottom gradient. */
+function waterShoreline(terrain:TerrainField,level:number){
+  const n=terrain.resolution,total=n*n,cell=terrain.cellSize;
+  const nearestX=new Float32Array(total),nearestZ=new Float32Array(total),squared=new Float64Array(total).fill(Infinity);
+  const height=(i:number)=>terrain.heights[i]-.025,waterLevel=level-.03;
+  const offer=(i:number,x:number,z:number)=>{
+    const distance=(i%n-x)**2+(Math.floor(i/n)-z)**2;
+    if(distance<squared[i]){squared[i]=distance;nearestX[i]=x;nearestZ[i]=z;}
+  };
+  const edge=(a:number,b:number)=>{
+    const ah=height(a),bh=height(b);if((ah<waterLevel)===(bh<waterLevel))return;
+    const t=(waterLevel-ah)/(bh-ah),x=a%n+(b%n-a%n)*t,z=Math.floor(a/n)+(Math.floor(b/n)-Math.floor(a/n))*t;
+    offer(a,x,z);offer(b,x,z);
+  };
+  for(let z=0;z<n;z++)for(let x=0;x<n;x++){
+    const i=z*n+x;
+    if(x<n-1)edge(i,i+1);
+    if(z<n-1)edge(i,i+n);
+    if(x<n-1&&z<n-1)edge(i,i+n+1);
+  }
+  // Propagate sub-cell crossings in linear time, only when the terrain changes.
+  for(const reverse of [false,true]){
+    const step=reverse?-1:1,from=reverse?n-1:0,to=reverse?-1:n;
+    for(let z=from;z!==to;z+=step)for(let x=from;x!==to;x+=step){
+      const i=z*n+x;
+      for(const [dx,dz] of [[-step,0],[-step,-step],[0,-step],[step,-step]]){
+        const nx=x+dx,nz=z+dz;if(nx<0||nz<0||nx>=n||nz>=n)continue;
+        const neighbor=nz*n+nx;if(!Number.isFinite(squared[neighbor]))continue;
+        offer(i,nearestX[neighbor],nearestZ[neighbor]);
+      }
+    }
+  }
+  const pixels=new Uint16Array(total),half=THREE.DataUtils.toHalfFloat;
+  for(let i=0;i<total;i++){
+    const distance=Math.sqrt(squared[i]),sign=height(i)<waterLevel?1:-1;
+    pixels[i]=half(sign*Math.min(64,distance*cell));
+  }
+  const texture=new THREE.DataTexture(pixels,n,n,THREE.RedFormat,THREE.HalfFloatType);
+  texture.name='water-shore-distance';texture.minFilter=texture.magFilter=THREE.LinearFilter;
+  texture.generateMipmaps=false;texture.needsUpdate=true;return texture;
+}
+
+// Keep the geometry in world space as the camera moves: the grid supplies LOD,
+// while the animated height field stays anchored to the terrain. Geometry waves
+// and capillary normals are separate, as in Minecraft's water shader pipelines.
+const WATER_GRID_SEGMENTS=192;
+const WATER_GRID_CELL=.75;
+const waterDisplacementShader=/* glsl */`
+  uniform float waterTime;
+  uniform sampler2D waterSwellMap;
+  uniform sampler2D waterShoreline;
+  uniform vec4 waterTerrainGrid;
+  uniform float waterLevel;
+  uniform vec2 waterDetailCenter;
+  float waterGridOffset(float index){
+    float a=abs(index);
+    // Match the inner grid spacing before gradually widening the outer cells.
+    return sign(index)*${WATER_GRID_CELL}*(min(a,64.0)+(exp2(max(a-64.0,0.0)*0.15)-1.0)*9.617967);
+  }
+  float waterSurfaceDetail(vec2 position){
+    float distanceToCamera=length(vec3(position.x-cameraPosition.x,waterLevel-cameraPosition.y,position.y-cameraPosition.z));
+    return 1.0-smoothstep(50.0,135.0,distanceToCamera);
+  }
+  float waterSurfaceHeight(vec2 position){
+    float detail=waterSurfaceDetail(position);
+    if(detail<=0.0)return 0.0;
+    vec2 grid=clamp((position-waterTerrainGrid.xy)/waterTerrainGrid.z,vec2(0.0),vec2(waterTerrainGrid.w-1.0));
+    float shoreDistance=textureLod(waterShoreline,(grid+0.5)/waterTerrainGrid.w,0.0).r;
+    float coast=1.0-smoothstep(2.0,12.0,max(0.0,shoreDistance));
+    // Let crests cross the mean shoreline instead of pinning every edge vertex
+    // to sea level. Fade out on dry ground so inland depressions stay dry.
+    float dryFade=1.0-smoothstep(0.35,1.8,max(0.0,-shoreDistance));
+    vec2 uv=position/42.0;
+    float broad=waterNoiseSample(waterSwellMap,uv,vec2(waterTime*0.006,-waterTime*0.004)).z;
+    float crossed=waterNoiseSample(waterSwellMap,mat2(0.8,0.6,-0.6,0.8)*uv*1.73+0.37,vec2(-waterTime*0.005,waterTime*0.007)).z;
+    // Break up crests along the coastline as well as across it; a constant
+    // shore phase would merely raise a straight waterline up and down.
+    float phase=shoreDistance*1.8+waterTime*1.65+broad*8.0+crossed*5.0;
+    float shoreWave=sin(phase)*0.18+sin(phase*1.67+crossed*3.0+waterTime*0.23)*0.045;
+    // Short waves fade before the outer grid becomes too coarse for them.
+    float shoreDetail=1.0-smoothstep(38.0,78.0,length(vec3(position.x-cameraPosition.x,waterLevel-cameraPosition.y,position.y-cameraPosition.z)));
+    return ((broad*0.32+crossed*0.14)*detail+shoreWave*coast*shoreDetail)*dryFade;
+  }
+`;
+
 function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,terrain:TerrainField,level:number){
   // Match the rendered ground's 2.5 cm offset and actual triangle diagonal.
   // Bilinear filtering would put the shallow-water transition off the bank.
   const heights=new THREE.DataTexture(Float32Array.from(terrain.heights,h=>h-.025),terrain.resolution,terrain.resolution,THREE.RedFormat,THREE.FloatType);
   heights.name='water-bottom-heightfield';heights.minFilter=heights.magFilter=THREE.NearestFilter;heights.generateMipmaps=false;heights.needsUpdate=true;
-  const material=new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:.14,metalness:0,ior:1.333,transmission:1,thickness:1,attenuationColor:new THREE.Color(0x7badb7),attenuationDistance:2.5,specularIntensity:1,envMapIntensity:1,normalMap:waterRipples()});
+  const shoreline=waterShoreline(terrain,level);
+  const material=new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:.14,metalness:0,ior:1.333,transmission:1,thickness:1,attenuationColor:new THREE.Color(0x7badb7),attenuationDistance:2.5,specularIntensity:1,envMapIntensity:1,normalMap:waterNoise('ripple')});
+  const detailCenter={value:new THREE.Vector2()};
   material.name='terrain-water-PBR';
-  material.addEventListener('dispose',()=>heights.dispose());
+  material.addEventListener('dispose',()=>{heights.dispose();shoreline.dispose();});
   material.onBeforeCompile=shader=>{
     shader.uniforms.waterTime=time;
     shader.uniforms.waterReflection=reflection.map;
     shader.uniforms.waterReflectionMatrix=reflection.matrix;
     shader.uniforms.waterReflectionReady=reflection.ready;
     shader.uniforms.waterTerrain={value:heights};
+    shader.uniforms.waterShoreline={value:shoreline};
+    shader.uniforms.waterSwellMap={value:waterNoise('swell')};
+    shader.uniforms.waterDetailCenter=detailCenter;
     shader.uniforms.waterTerrainGrid={value:new THREE.Vector4(terrain.originX,terrain.originZ,terrain.cellSize,terrain.resolution)};
     shader.uniforms.waterLevel={value:level-.03};
     shader.uniforms.waterScatterColor={value:new THREE.Color(0x244950)};
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
+      ${waterSamplingShader}
+      ${waterDisplacementShader}
       uniform mat4 waterReflectionMatrix;
       varying vec2 waterPosition;
+      varying vec4 waterSurface;
       varying vec4 waterMirrorCoord;`).replace('#include <begin_vertex>',`#include <begin_vertex>
-      waterPosition=(modelMatrix*vec4(position,1.0)).xz;
-      waterMirrorCoord=waterReflectionMatrix*vec4(position,1.0);`);
+      vec2 waterIndex=vec2(position.x,-position.y)*${WATER_GRID_SEGMENTS/2}.0;
+      vec2 waterMin=waterTerrainGrid.xy,waterMax=waterMin+vec2(waterTerrainGrid.z*(waterTerrainGrid.w-1.0));
+      waterPosition=clamp(waterDetailCenter+vec2(waterGridOffset(waterIndex.x),waterGridOffset(waterIndex.y)),waterMin,waterMax);
+      // The last row spans the rest of the map. Its height is already zero at
+      // this distance, joining the detailed centre to a flat far surface.
+      if(waterIndex.x<=-${WATER_GRID_SEGMENTS/2}.0)waterPosition.x=waterMin.x;
+      if(waterIndex.x>=${WATER_GRID_SEGMENTS/2}.0)waterPosition.x=waterMax.x;
+      if(waterIndex.y<=-${WATER_GRID_SEGMENTS/2}.0)waterPosition.y=waterMin.y;
+      if(waterIndex.y>=${WATER_GRID_SEGMENTS/2}.0)waterPosition.y=waterMax.y;
+      float waterHeight=waterSurfaceHeight(waterPosition);
+      // Derive lighting normals from the same height function as displacement.
+      // Interpolation keeps the close grid smooth without per-pixel height taps.
+      vec2 waterHeightSlope=-(vec2(waterSurfaceHeight(waterPosition+vec2(0.25,0.0)),waterSurfaceHeight(waterPosition+vec2(0.0,0.25)))-waterHeight)/0.25;
+      waterSurface=vec4(waterHeight,waterHeightSlope,waterSurfaceDetail(waterPosition));
+      vec2 waterLocal=waterPosition-(waterMin+waterMax)*0.5;
+      transformed=vec3(waterLocal.x,-waterLocal.y,waterHeight);
+      waterMirrorCoord=waterReflectionMatrix*vec4(transformed,1.0);`);
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+      #define WATER_FRAGMENT_SAMPLE
+      ${waterSamplingShader}
       uniform float waterTime;
       uniform sampler2D waterReflection;
       uniform float waterReflectionReady;
       uniform sampler2D waterTerrain;
+      uniform sampler2D waterShoreline;
+      uniform sampler2D waterSwellMap;
       uniform vec4 waterTerrainGrid;
       uniform float waterLevel;
       uniform vec3 waterScatterColor;
       varying vec2 waterPosition;
+      varying vec4 waterSurface;
       varying vec4 waterMirrorCoord;
       float waterBottomHeight(vec2 position){
         vec2 grid=clamp((position-waterTerrainGrid.xy)/waterTerrainGrid.z,vec2(0.0),vec2(waterTerrainGrid.w-1.0));
@@ -80,20 +253,29 @@ function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,te
         float d=texelFetch(waterTerrain,cell+ivec2(1,1),0).r;
         return t.x>t.y?a+(b-a)*t.x+(d-b)*t.y:a+(d-c)*t.x+(c-a)*t.y;
       }`).replace('#include <normal_fragment_maps>',`
-      float waterDepth=max(0.0,waterLevel-waterBottomHeight(waterPosition));
-      vec2 waterUv=waterPosition/24.0;
-      vec2 rippleA=texture2D(normalMap,waterUv+vec2(waterTime*0.018,waterTime*0.007)).rg*2.0-1.0;
-      vec2 rippleB=texture2D(normalMap,vec2(-waterUv.y,waterUv.x)*3.4+vec2(-waterTime*0.031,waterTime*0.024)).rg*2.0-1.0;
+      float waterDepth=max(0.0,waterLevel+waterSurface.x-waterBottomHeight(waterPosition));
+      vec2 waterGrid=clamp((waterPosition-waterTerrainGrid.xy)/waterTerrainGrid.z,vec2(0.0),vec2(waterTerrainGrid.w-1.0));
+      float waterShoreDistance=max(0.0,texture2D(waterShoreline,(waterGrid+0.5)/waterTerrainGrid.w).r);
+      vec2 waterUv=waterPosition/20.0;
+      vec2 rippleA=waterNoiseSample(normalMap,waterUv,vec2(waterTime*0.015,waterTime*0.009)).xy;
+      vec2 rippleB=waterNoiseSample(normalMap,mat2(0.6,-0.8,0.8,0.6)*waterUv*2.9,vec2(-waterTime*0.023,waterTime*0.019)).xy;
+      rippleB=vec2(0.6*rippleB.x-0.8*rippleB.y,0.8*rippleB.x+0.6*rippleB.y);
       float waterFootprint=length(fwidth(waterPosition));
-      float waterDetail=1.0-smoothstep(0.25,2.5,waterFootprint);
-      // Broad wind waves remain readable beyond the fine, mipmapped ripples.
-      vec2 waterWindA=vec2(0.93,0.37),waterWindB=vec2(-0.45,0.89);
-      vec2 waterSwell=waterWindA*0.065*cos(dot(waterPosition,waterWindA)*0.65-waterTime*1.05)
-        +waterWindB*0.04*cos(dot(waterPosition,waterWindB)*1.08-waterTime*1.32);
-      waterSwell*=1.0-smoothstep(2.0,12.0,waterFootprint);
-      vec2 waterSlope=waterSwell+(rippleA+vec2(-rippleB.y,rippleB.x)*0.5)*1.7*waterDetail;
-      waterSlope*=smoothstep(0.0,0.7,waterDepth);
+      float waterDetail=1.0-smoothstep(0.18,1.8,waterFootprint);
+      // Retain restrained broad motion after real displacement fades out.
+      vec2 waterMacroUv=waterPosition/42.0;
+      vec2 waterFarA=waterNoiseSample(waterSwellMap,waterMacroUv,vec2(waterTime*0.006,-waterTime*0.004)).xy;
+      vec2 waterFarB=waterNoiseSample(waterSwellMap,mat2(0.8,0.6,-0.6,0.8)*waterMacroUv*1.73+0.37,vec2(-waterTime*0.005,waterTime*0.007)).xy;
+      vec2 waterFarSlope=waterFarA*0.06+vec2(0.8*waterFarB.x+0.6*waterFarB.y,-0.6*waterFarB.x+0.8*waterFarB.y)*0.045;
+      waterFarSlope*=(1.0-waterSurface.w)*(1.0-smoothstep(2.0,12.0,waterFootprint));
+      float waterCoast=(1.0-smoothstep(2.0,11.0,waterShoreDistance))*smoothstep(0.0,0.06,waterDepth);
+      // Restrain fine normals at grazing angles; geometry supplies the bank's
+      // changing silhouette instead of increasingly distorted flat reflections.
+      vec3 waterView=inverseTransformDirection(normalize(vViewPosition),viewMatrix);
+      float waterGrazing=mix(0.4,1.0,smoothstep(0.02,0.5,abs(waterView.y)));
+      vec2 waterSlope=waterSurface.yz+waterFarSlope+(rippleA+rippleB*0.55)*(1.15+waterCoast*0.25)*waterDetail*waterGrazing;
       normal=normalize(mat3(viewMatrix)*vec3(waterSlope.x,1.0,waterSlope.y));
+      roughnessFactor=clamp(roughnessFactor+waterCoast*0.03+(1.0-waterDetail)*0.045,0.0,1.0);
       `).replace('#include <lights_fragment_maps>',`#include <lights_fragment_maps>
       // Feed linear HDR scene reflection into the physical BRDF, which supplies
       // water's Fresnel response and keeps the direct sun's moving highlights.
@@ -120,7 +302,7 @@ function waterMaterial(time:{value:number},reflection:WaterReflectionUniforms,te
       vec3 waterFresnel=EnvironmentBRDF(normal,normalize(vViewPosition),material.specularColor,material.specularF90,material.roughness);
       totalDiffuse+=waterScatterLight*(vec3(1.0)-waterTransmittance)*(vec3(1.0)-waterFresnel);`);
   };
-  material.customProgramCacheKey=()=> 'terrain-water-depth-transmission-v4';return material;
+  material.customProgramCacheKey=()=> 'terrain-water-stochastic-displacement-v7';return {material,detailCenter};
 }
 
 /** Clip only for placement queries; the terrain itself is never cut away. */
@@ -138,28 +320,33 @@ function submerged(points:(Point&{height:number})[],level:number):Point[]{
 }
 const hasArea=(points:Point[])=>points.length>=3&&Math.abs(points.reduce((sum,a,i)=>{const b=points[(i+1)%points.length];return sum+a.x*b.z-b.x*a.z;},0))>1e-8;
 
-/** One horizontal water surface for every terrain, including hand-drawn maps.
- * Terrain depth occludes water on land; pavement retains its supporting ground. */
+/** One shared mean level for every terrain, including hand-drawn maps. Nearby
+ * waves move the real surface; terrain depth still occludes it on dry ground. */
 export class TerrainWater {
   readonly group=new THREE.Group();
   private readonly clock={value:0};
+  private readonly waveTime={value:0};
   private readonly reflection:Reflector;
   private constructor(readonly level:number,private terrain:TerrainField,quays:QuayEdge[],assets?:SceneAssets){
     this.group.name='terrain-sea-level-water';
-    const geometry=new THREE.PlaneGeometry(terrain.size,terrain.size);
+    const geometry=new THREE.PlaneGeometry(2,2,WATER_GRID_SEGMENTS,WATER_GRID_SEGMENTS);
     // The helper only captures the reflected view; the visible surface retains
     // physical lighting, depth occlusion, fog and a shared mean water level.
     this.reflection=new Reflector(geometry,{textureWidth:512,textureHeight:512,clipBias:.001,multisample:0});
     const reflectionMaterial=this.reflection.material as THREE.ShaderMaterial;
     const reflection:WaterReflectionUniforms={map:{value:this.reflection.getRenderTarget().texture},matrix:reflectionMaterial.uniforms.textureMatrix,ready:{value:0}};
-    const mesh=new THREE.Mesh(geometry,waterMaterial(this.clock,reflection,terrain,level));
+    const {material,detailCenter}=waterMaterial(this.waveTime,reflection,terrain,level);
+    const mesh=new THREE.Mesh(geometry,material);
     mesh.rotation.x=-Math.PI/2;
     mesh.position.set(terrain.originX+terrain.size/2,level-.03,terrain.originZ+terrain.size/2);
-    // Ground sits 2.5 cm below its collision samples; keep equal-height land dry.
-    mesh.name='horizontal-water-surface';mesh.receiveShadow=true;
+    // The shader spreads this grid across the terrain, with 75 cm cells near
+    // the camera and progressively coarser rows outside the displacement band.
+    mesh.name='terrain-water-local-waves';mesh.receiveShadow=true;mesh.frustumCulled=false;
     let lastReflection=-Infinity;
     const reflectedView=new THREE.Matrix4(),reflectedProjection=new THREE.Matrix4();
     mesh.onBeforeRender=(renderer,scene,camera,geo,material,group)=>{
+      const cameraPosition=camera.matrixWorld.elements;
+      detailCenter.value.set(Math.round(cameraPosition[12]/WATER_GRID_CELL)*WATER_GRID_CELL,Math.round(cameraPosition[14]/WATER_GRID_CELL)*WATER_GRID_CELL);
       // Static views need only 30 captures/sec; camera movement refreshes the
       // projection immediately. Ripple animation always runs at display rate.
       if(this.clock.value-lastReflection<1/30&&reflectedView.equals(camera.matrixWorld)&&reflectedProjection.equals(camera.projectionMatrix))return;
@@ -196,7 +383,7 @@ export class TerrainWater {
     const material=new THREE.MeshStandardMaterial({map:assets.concrete.map,normalMap:assets.concrete.normalMap,normalScale:new THREE.Vector2(.25,.25),vertexColors:true,roughness:.92,envMapIntensity:.35,side:THREE.DoubleSide});
     const mesh=new THREE.Mesh(geometry,material);mesh.name='generated-waterfront-foundations';mesh.receiveShadow=true;this.group.add(mesh);
   }
-  update(time:number){this.clock.value=time;}
+  update(time:number){this.clock.value=time;this.waveTime.value=time*2;}
   dispose(){this.reflection.dispose();disposeSceneGroup(this.group);}
   contains(p:Point){
     const f=this.terrain;
