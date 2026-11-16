@@ -3,6 +3,7 @@ import { parseTerrain, type TerrainData } from './terrain';
 import {trackFeatures,type TrackFeatures} from './track-features';
 import {drapeTriangles,type TerrainGrid} from './terrain-mesh';
 import {racingLineOffsets} from './racing-line';
+import {applyRunoffProfile} from './runoff-profile';
 import {FootprintIndex,clipHalfPlane,cross2,footprintPolygon,polygonContains,type FootprintPolygon} from './track-footprint';
 
 export interface Point { x: number; z: number }
@@ -77,6 +78,7 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   });
   for(let k=0;k<2;k++){const c=samples.map((_,i)=>{let v=0;for(let j=-2;j<=2;j++)v+=samples[(i+j+n)%n].curvature;return v/5;});samples.forEach((s,i)=>s.curvature=c[i]);}
   const features=trackFeatures(samples,length);
+  applyRunoffProfile({samples,features,length,width:settings.width},CURB_WIDTH);
   samples.forEach(s=>s.kind=Math.abs(s.curvature)>features.threshold*(.034/.009)?'hairpin':Math.abs(s.curvature)>features.threshold?'curve':'straight');
   // A near-miss between distant sections must have space for both road edges.
   const neighborSkip=Math.ceil((settings.width*2.2)/step);
@@ -86,9 +88,7 @@ export function buildTrack(raw:Point[],settings:TrackSettings,options:BuildOptio
   for(let k=0;k<=n;k++){const s=samples[(k+Math.max(0,offset))%n];const turn=Math.sign(s.curvature);if(s.kind!=='straight'){if(!inCorner||turn!==sign){if(inCorner&&hasHairpin)hairpins++;corners++;hasHairpin=false;}inCorner=true;sign=turn;hasHairpin ||= s.kind==='hairpin';}else{if(inCorner&&hasHairpin)hairpins++;inCorner=false;hasHairpin=false;}}
   const xs=samples.map(s=>s.x),zs=samples.map(s=>s.z);
   const bridges:Bridge[]=crossings.slice(0,8).map(c=>({index:c.j,otherIndex:c.i,distance:c.j*step,height:5.2,halfLength:Math.min(length*.06,Math.max(42,settings.width*6))}));
-  let smooth:Point[]=samples.map(s=>({x:s.x,z:s.z}));const radius=Math.max(2,Math.min(100,Math.ceil(14*features.scale/step)));
-  for(let pass=0;pass<3;pass++){const previous=smooth;smooth=previous.map((_,i)=>{let x=0,z=0,w=0;const localRadius=Math.max(radius,Math.min(120,Math.ceil((14*features.scale+features.runoffWidth[i]*.5)/step)));for(let j=-localRadius;j<=localRadius;j++){const weight=localRadius+1-Math.abs(j),p=previous[(i+j+n)%n];x+=p.x*weight;z+=p.z*weight;w+=weight;}return{x:x/w,z:z/w};});}
-  const runoff:RunoffSample[]=smooth.map((p,i)=>{const a=smooth[(i-2+n)%n],b=smooth[(i+2)%n],dx=b.x-a.x,dz=b.z-a.z,l=Math.hypot(dx,dz)||1;return {...p,nx:-dz/l,nz:dx/l,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]};});
+  const runoff:RunoffSample[]=samples.map((s,i)=>({x:s.x,z:s.z,nx:s.nx,nz:s.nz,radius:settings.width/2+CURB_WIDTH+features.runoffWidth[i]}));
   const runoffRegions=makeRunoffRegions(samples,features,settings.width,runoff,bridges);
   return {controls,samples,features,runoff,runoffRegions,length,width:settings.width,corners,hairpins,bridges,straightPercent:Math.round(samples.filter(s=>s.kind==='straight').length/n*100),bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs)},visualCurve:curve};
 }
@@ -102,40 +102,73 @@ export function makeRunoffRegions(samples:TrackSample[],features:TrackFeatures,r
   const n=samples.length,runoffRegions:RunoffRegion[]=[],road=new FootprintIndex(roadFootprint(samples,features,roadWidth)),step=samples[1].distance-samples[0].distance,length=step*n;
   const deck=samples.map((_,i)=>bridgeHeight({samples,bridges,length,width:roadWidth},i));
   const area=(p:Point[])=>Math.abs(p.reduce((sum,a,i)=>{const b=p[(i+1)%p.length];return sum+a.x*b.z-b.x*a.z;},0));
-  for(const side of [-1,1])for(let i=0;i<n;i++){const widths=side>0?features.runoffLeft:features.runoffRight,j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;
-    const edge=(k:number):[Point,Point]=>{
-      const s=samples[k],r=runoff[k],kerb=(side>0?features.left:features.right)[k],edgeOffset=roadWidth/2+CURB_WIDTH*kerb,a={x:s.x+s.nx*edgeOffset*side,z:s.z+s.nz*edgeOffset*side};
-      // Fade the entire lateral displacement, not just the minimum width.
-      // At zero width the outer edge meets the road tangentially.
-      const width=widths[k];
-      let nx=s.nx*.7+r.nx*.3,nz=s.nz*.7+r.nz*.3;const norm=Math.hypot(nx,nz)||1;nx/=norm;nz/=norm;
-      return [a,{x:a.x+nx*side*width,z:a.z+nz*side*width}];
-    };
-    const [a,b]=edge(i),[c,d]=edge(j),source={x:(a.x+c.x)/2,z:(a.z+c.z)/2},bounds=footprintPolygon([a,b,c,d],i);
-    const blockers=[...road.query(bounds.minX,bounds.maxX,bounds.minZ,bounds.maxZ)].filter(r=>{
-      const delta=Math.abs(r.index-i),separation=Math.min(delta,n-delta);return separation>2&&separation*step>roadWidth*1.1&&Math.abs(deck[i]-deck[r.index])<1;
-    }).sort((a,b)=>Math.hypot(samples[a.index].x-source.x,samples[a.index].z-source.z)-Math.hypot(samples[b.index].x-source.x,samples[b.index].z-source.z));
-    // Stop at the first neighbouring road. Subtracting only its asphalt would
-    // leave a disconnected runoff lobe on the far side of the straight.
-    for(const triangle of [[a,b,c],[b,d,c]]){
-      let points:Point[]=triangle;
-      for(const blocker of blockers){
-        const polygon=blocker.points,orientation=Math.sign(polygon.reduce((sum,p,k)=>{const q=polygon[(k+1)%polygon.length];return sum+p.x*q.z-q.x*p.z;},0))||1;
-        let overlap=points,cutA:Point|undefined,cutB:Point|undefined,cutDistance=0,lateralA:Point|undefined,lateralB:Point|undefined,lateralDistance=0;
-        for(let k=0;k<polygon.length;k++){
-          const p=polygon[k],q=polygon[(k+1)%polygon.length],signed=cross2(p,q,source)*orientation/(Math.hypot(q.x-p.x,q.z-p.z)||1);
-          overlap=clipHalfPlane(overlap,p,q,orientation);
-          if(signed<cutDistance){cutDistance=signed;cutA=p;cutB=q;}
-          // Prefer the road's long edge to individual segment end caps. This
-          // keeps a continuous clipping line along a neighbouring straight.
-          if((k===1||k===3)&&signed<lateralDistance){lateralDistance=signed;lateralA=p;lateralB=q;}
+  for(const side of [-1,1]){
+    const requested=side>0?features.runoffLeft:features.runoffRight;
+    const roadEdge=(k:number)=>{const s=samples[k],offset=roadWidth/2+CURB_WIDTH*(side>0?features.left:features.right)[k];return{x:s.x+s.nx*offset*side,z:s.z+s.nz*offset*side};};
+    // Limit each complete outward span before triangulating it. Clipping only
+    // triangles can leave far-side lobes and diagonal ends behind another road.
+    let widths=requested.map((width,i)=>{
+      if(width<.001)return 0;
+      const a=roadEdge(i),s=samples[i],dx=s.nx*side,dz=s.nz*side,b={x:a.x+dx*width,z:a.z+dz*width};let limit=width;
+      for(const blocker of road.query(Math.min(a.x,b.x),Math.max(a.x,b.x),Math.min(a.z,b.z),Math.max(a.z,b.z))){
+        const delta=Math.abs(blocker.index-i),separation=Math.min(delta,n-delta);
+        if(separation<=2||separation*step<=roadWidth*1.1||Math.abs(deck[i]-deck[blocker.index])>=1)continue;
+        if(polygonContains(blocker.points,a))return 0;
+        for(let k=0;k<blocker.points.length;k++){
+          const p=blocker.points[k],q=blocker.points[(k+1)%blocker.points.length],ex=q.x-p.x,ez=q.z-p.z,denominator=dx*ez-dz*ex;
+          if(Math.abs(denominator)<1e-8)continue;
+          const px=p.x-a.x,pz=p.z-a.z,t=(px*ez-pz*ex)/denominator,u=(px*dz-pz*dx)/denominator;
+          if(t>=0&&t<=limit&&u>=0&&u<=1)limit=Math.max(0,t-.35);
         }
-        if(overlap.length<3||area(overlap)<1e-6)continue;
-        if(lateralA&&lateralB){cutA=lateralA;cutB=lateralB;}
-        if(!cutA||!cutB){points=[];break;}
-        points=clipHalfPlane(points,cutA,cutB,-orientation);if(points.length<3)break;
       }
-      if(points.length>=3&&area(points)>1e-6)runoffRegions.push({...footprintPolygon(points,i),side});
+      return limit;
+    });
+    // Round a clipped end inward, so smoothing cannot leak across a straight.
+    const radius=Math.max(1,Math.ceil(Math.min(4,roadWidth*.35)/step));
+    for(let pass=0;pass<3;pass++){
+      const previous=widths;widths=previous.map((width,i)=>{
+        let sum=0,weight=0;for(let k=-radius;k<=radius;k++){const w=radius+1-Math.abs(k);sum+=previous[(i+k+n)%n]*w;weight+=w;}
+        return Math.min(width,(width+sum/weight)*.5);
+      });
+    }
+    const taperLength=Math.min(18,Math.max(6,roadWidth*.9)),taperSamples=Math.min(n-1,Math.ceil(taperLength/step)),clipped=widths;
+    widths=clipped.map((width,i)=>{
+      if(width<.001)return 0;
+      let distance=taperLength;
+      for(let k=1;k<=taperSamples;k++)if(clipped[(i+k)%n]<.001||clipped[(i-k+n)%n]<.001){distance=Math.min(distance,k*step);break;}
+      const t=Math.min(1,distance/taperLength),fade=t*t*t*(10+t*(-15+6*t));return width*fade;
+    });
+    for(let i=0;i<n;i++){const j=(i+1)%n;if(widths[i]<.001&&widths[j]<.001)continue;
+      const edge=(k:number):[Point,Point]=>{
+        const r=runoff[k],a=roadEdge(k);
+        return [a,{x:a.x+r.nx*side*widths[k],z:a.z+r.nz*side*widths[k]}];
+      };
+      const [a,b]=edge(i),[c,d]=edge(j),source={x:(a.x+c.x)/2,z:(a.z+c.z)/2},bounds=footprintPolygon([a,b,c,d],i);
+      const blockers=[...road.query(bounds.minX,bounds.maxX,bounds.minZ,bounds.maxZ)].filter(r=>{
+        const delta=Math.abs(r.index-i),separation=Math.min(delta,n-delta);return separation>2&&separation*step>roadWidth*1.1&&Math.abs(deck[i]-deck[r.index])<1;
+      }).sort((a,b)=>Math.hypot(samples[a.index].x-source.x,samples[a.index].z-source.z)-Math.hypot(samples[b.index].x-source.x,samples[b.index].z-source.z));
+      // Stop at the first neighbouring road. Subtracting only its asphalt would
+      // leave a disconnected runoff lobe on the far side of the straight.
+      for(const triangle of [[a,b,c],[b,d,c]]){
+        let points:Point[]=triangle;
+        for(const blocker of blockers){
+          const polygon=blocker.points,orientation=Math.sign(polygon.reduce((sum,p,k)=>{const q=polygon[(k+1)%polygon.length];return sum+p.x*q.z-q.x*p.z;},0))||1;
+          let overlap=points,cutA:Point|undefined,cutB:Point|undefined,cutDistance=0,lateralA:Point|undefined,lateralB:Point|undefined,lateralDistance=0;
+          for(let k=0;k<polygon.length;k++){
+            const p=polygon[k],q=polygon[(k+1)%polygon.length],signed=cross2(p,q,source)*orientation/(Math.hypot(q.x-p.x,q.z-p.z)||1);
+            overlap=clipHalfPlane(overlap,p,q,orientation);
+            if(signed<cutDistance){cutDistance=signed;cutA=p;cutB=q;}
+            // Prefer the road's long edge to individual segment end caps. This
+            // keeps a continuous clipping line along a neighbouring straight.
+            if((k===1||k===3)&&signed<lateralDistance){lateralDistance=signed;lateralA=p;lateralB=q;}
+          }
+          if(overlap.length<3||area(overlap)<1e-6)continue;
+          if(lateralA&&lateralB){cutA=lateralA;cutB=lateralB;}
+          if(!cutA||!cutB){points=[];break;}
+          points=clipHalfPlane(points,cutA,cutB,-orientation);if(points.length<3)break;
+        }
+        if(points.length>=3&&area(points)>1e-6)runoffRegions.push({...footprintPolygon(points,i),side});
+      }
     }
   }
   return runoffRegions;

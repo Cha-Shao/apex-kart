@@ -1,12 +1,13 @@
 import type {TrackData} from './track';
 
-const cache=new WeakMap<TrackData,number[]>();
+export type RacingLineTrack=Pick<TrackData,'samples'|'length'|'width'|'features'>;
+const cache=new WeakMap<RacingLineTrack,number[]>();
 const clamp01=(value:number)=>Math.max(0,Math.min(1,value));
 const ease=(value:number)=>{const t=clamp01(value);return t*t*t*(10+t*(-15+6*t));};
 
-/** A visual outside/apex/outside line, in metres along the centreline normal.
- * Shared by asphalt rubber and kerb wear; it does not steer the car. */
-export function racingLineOffsets(track:TrackData):number[]{
+/** An outside/apex/outside line, in metres along the centreline normal.
+ * Shared by asphalt rubber, kerb wear and runoff planning; it does not steer the car. */
+export function racingLineOffsets(track:RacingLineTrack):number[]{
   const cached=cache.get(track);if(cached)return cached;
   const {samples,length,width}=track,n=samples.length,step=length/n,limit=Math.max(.4,width/2-.28);
   const turns=samples.map(s=>Math.abs(s.curvature)>track.features.threshold*.75?Math.sign(s.curvature):0);
