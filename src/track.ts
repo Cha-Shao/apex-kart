@@ -23,7 +23,7 @@ export interface Bridge { index:number;otherIndex:number;distance:number;height:
 export interface BuildOptions { preserveLayout?:boolean;allowCrossings?:boolean }
 export interface RouteMetadata {circuitId:string;scale:'native'|'compact';terrainVersion?:number;terrainEdited?:boolean}
 export interface TrackSettings { width: number; smoothness: number; barriers: boolean }
-export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:60, barriers:false };
+export const DEFAULT_SETTINGS: TrackSettings = { width:10, smoothness:50, barriers:false };
 export const PRESETS: { id:string; name:string; subtitle:string; points:Point[] }[] = [
   {id:'club',name:'海岸俱乐部',subtitle:'CLUB CIRCUIT',points:[{x:-117,z:80},{x:-45,z:80},{x:45,z:80},{x:119,z:77},{x:145,z:58},{x:144,z:25},{x:125,z:7},{x:79,z:4},{x:65,z:-14},{x:77,z:-34},{x:126,z:-37},{x:143,z:-58},{x:135,z:-86},{x:107,z:-99},{x:20,z:-101},{x:-62,z:-101},{x:-108,z:-92},{x:-130,z:-67},{x:-124,z:-41},{x:-91,z:-24},{x:-52,z:-27},{x:-30,z:-11},{x:-29,z:12},{x:-52,z:29},{x:-110,z:29},{x:-134,z:47},{x:-136,z:65}]},
   {id:'flow',name:'流线公园',subtitle:'FLOW PARK',points:[{x:-128,z:60},{x:-55,z:81},{x:30,z:79},{x:111,z:62},{x:143,z:29},{x:128,z:-7},{x:63,z:-23},{x:47,z:-63},{x:10,z:-92},{x:-55,z:-87},{x:-85,z:-51},{x:-65,z:-12},{x:-103,z:8},{x:-139,z:30}]},
@@ -274,7 +274,7 @@ export function parseTrackFile(text:string):TrackFile {
   if(v.points.some((p:any)=>!Number.isFinite(p.x)||!Number.isFinite(p.z)||Math.abs(p.x)>20000||Math.abs(p.z)>20000))throw new Error('赛道坐标超出了画布范围。');
   const savedSettings={...DEFAULT_SETTINGS,...v.settings};
   const width=Number(savedSettings.width),smoothness=Number(savedSettings.smoothness);
-  const settings:TrackSettings={width:Math.max(6,Math.min(18,Number.isFinite(width)?width:10)),smoothness:Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:60)),barriers:false};
+  const settings:TrackSettings={width:Math.max(6,Math.min(18,Number.isFinite(width)?width:10)),smoothness:Math.max(0,Math.min(100,Number.isFinite(smoothness)?smoothness:DEFAULT_SETTINGS.smoothness)),barriers:false};
   const route=v.route&&typeof v.route.circuitId==='string'&&['native','compact'].includes(v.route.scale)?{circuitId:v.route.circuitId.slice(0,80),scale:v.route.scale} as RouteMetadata:undefined;
   if(route){
     if(Number.isSafeInteger(v.route.terrainVersion)&&v.route.terrainVersion>0)route.terrainVersion=v.route.terrainVersion;

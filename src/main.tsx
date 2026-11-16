@@ -84,7 +84,6 @@ $('#app').innerHTML=`
       <p class="editor-status" id="editor-status">拖动控制点，微调你的走线。</p></div>
       <div class="editor-section settings-section"><div class="section-label"><span><b>02</b> 赛道设定</span><i data-lucide="settings-2"></i></div>
       <label class="range-label" for="width-range"><span>赛道宽度</span><output id="width-output">10 <small>m</small></output></label><input id="width-range" type="range" min="6" max="18" step="1" value="10"/><div class="range-extents"><span>窄 · 技术型</span><span>宽 · 高速型</span></div>
-      <label class="range-label smooth-label" for="smooth-range"><span>曲线平滑度</span><output id="smooth-output">60<small>%</small></output></label><input id="smooth-range" type="range" min="0" max="100" step="5" value="60"/>
       </div>
       <div class="file-actions"><button id="export-button"><i data-lucide="arrow-down-to-line"></i>导出 JSON</button><span></span><button id="import-button"><i data-lucide="arrow-up-from-line"></i>导入赛道</button></div>
       </section>
@@ -157,7 +156,7 @@ function selectVehicle(id:VehicleId){
 
 function setStatus(message:string,error=false){$('#editor-status').textContent=message;$('#editor-status').classList.toggle('error',error);}
 function updateStats(track:TrackData|null){for(const [id,value,unit] of [['length',track?Math.round(track.length):'—','m'],['corners',track?.corners??'—','个'],['hairpins',track?.hairpins??'—','个'],['straights',track?.straightPercent??'—','%']] as const)$(`#stat-${id}`).innerHTML=`${value} <small>${unit}</small>`;}
-function syncSettings(){const w=$<HTMLInputElement>('#width-range'),s=$<HTMLInputElement>('#smooth-range');w.value=String(settings.width);s.value=String(settings.smoothness);w.style.setProperty('--progress',`${(settings.width-6)/12*100}%`);s.style.setProperty('--progress',`${settings.smoothness}%`);$('#width-output').innerHTML=`${settings.width} <small>m</small>`;$('#smooth-output').innerHTML=`${settings.smoothness}<small>%</small>`;}
+function syncSettings(){const w=$<HTMLInputElement>('#width-range');w.value=String(settings.width);w.style.setProperty('--progress',`${(settings.width-6)/12*100}%`);$('#width-output').innerHTML=`${settings.width} <small>m</small>`;}
 function scheduleDraft(){
   if(!game||running||loadingElevation||terrainPainter?.painting||!draftTrack||previewTimer!==undefined)return;
   previewTimer=window.setTimeout(()=>{previewTimer=undefined;if(dirty&&!running&&!loadingElevation&&!terrainPainter?.painting&&draftTrack)applyDraft(true);},180);
@@ -240,7 +239,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.addEven
 $('#new-button').addEventListener('click',()=>{$<HTMLSelectElement>('#circuit-select').value='';draftRoute=undefined;editor.options={};editor.clear();terrainPainter!.setField(new TerrainField());updateTerrainControls();draftName='我的手绘赛道';document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('selected',(x as HTMLElement).dataset.tool==='draw'));$('#track-canvas').focus();});
 $('#clear-button').addEventListener('click',()=>$('#new-button').click());$('#undo-button').addEventListener('click',()=>editor.undo());
 $('#width-range').addEventListener('input',e=>{settings.width=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
-$('#smooth-range').addEventListener('input',e=>{settings.smoothness=Number((e.target as HTMLInputElement).value);syncSettings();editor.updateSettings(settings);});
 function syncBrushControls(){
   if(!terrainPainter)return;
   const radius=$<HTMLInputElement>('#brush-radius'),strength=$<HTMLInputElement>('#brush-strength'),hardness=$<HTMLInputElement>('#brush-hardness');
