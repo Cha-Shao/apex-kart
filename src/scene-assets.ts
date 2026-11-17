@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HDRLoader} from 'three/addons/loaders/HDRLoader.js';
-import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,type RoadWearUniforms} from './surface-materials';
+import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,roadPaintMaterial,matteFoliage,type RoadWearUniforms} from './surface-materials';
 import {roadWearTexture} from './road-wear';
+import {foliageMipmaps,TREE_ASSET_BASE,TREE_MODELS} from './foliage';
+import {treeLodFade} from './tree-lod';
 import type {TrackData} from './track';
 
 const BASE='/assets/cc0/';
@@ -53,6 +55,10 @@ export class SceneAssets {
   readonly fabric:THREE.MeshStandardMaterial;
   readonly carbon:THREE.MeshStandardMaterial;
   readonly kerb:THREE.MeshStandardMaterial;
+  readonly roadPaint:THREE.MeshStandardMaterial;
+  readonly treeViewPosition=new THREE.Vector3();
+  private readonly treeMaterials=new Map<string,THREE.Material>();
+  private readonly treeDepthMaterials=new Map<string,THREE.MeshDepthMaterial>();
   readonly tyre=tyreMaterial();
   private readonly asphaltAggregate=asphaltAggregateTexture();
   private readonly grassRelief=grassReliefTexture();
@@ -80,9 +86,11 @@ export class SceneAssets {
     this.fabric=this.pbr('fabric_pattern_07',0x33505e,1,.22,5);this.fabric.map=null;
     this.carbon=this.pbr('fabric_pattern_07',0x15191e,.65,.16,9);this.carbon.map=null;
     this.kerb=paintedSurface(this.pbr('concrete_layers_02',0xffffff,.93,1.25));this.kerb.envMapIntensity=.35;this.kerb.vertexColors=true;this.kerb.name='painted-concrete-kerb';this.kerb.polygonOffset=true;this.kerb.polygonOffsetFactor=-4;this.kerb.polygonOffsetUnits=-4;
-    for(const material of [this.grass,this.asphalt,this.runoff,this.gravel,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb])material.userData.sharedCC0=true;
-    const models=['tree_small_02','pine_sapling_small','tree_small_02-far','pine_sapling_small-far','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const gltf=await new GLTFLoader().loadAsync(`${BASE}${name}.glb`);
+    this.roadPaint=roadPaintMaterial(this.texture('clean_asphalt','normal'));
+    for(const material of [this.grass,this.asphalt,this.runoff,this.gravel,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
+    const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
+    const models=[...vegetation,'kart-oopi','sedan-sports','truck','cone'].map(async name=>{
+      const tree=vegetation.includes(name),gltf=await new GLTFLoader().loadAsync(`${tree?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=web-trees-1':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
@@ -92,7 +100,9 @@ export class SceneAssets {
           for(const value of Object.values(material))if(value instanceof THREE.Texture){value.anisotropy=this.anisotropy;value.userData.sharedCC0=true;}
           // Alpha testing writes depth and gives stable foliage shadows without sorting artifacts.
           if(material instanceof THREE.MeshStandardMaterial&&/leaves|twig/.test(material.name)){
-            material.transparent=false;material.alphaTest=.45;material.side=THREE.DoubleSide;material.roughness=1;
+            const occlusion=object.geometry.getAttribute('_canopy_occlusion');
+            if(occlusion)object.geometry.setAttribute('canopyOcclusion',occlusion);
+            matteFoliage(material,!!occlusion);if(material.map)foliageMipmaps(material.map,material.alphaTest);
           }
         }
       });
@@ -114,7 +124,7 @@ export class SceneAssets {
       this.sunDirection.set(Math.cos(elevation)*Math.cos(azimuth),Math.sin(elevation),Math.cos(elevation)*Math.sin(azimuth));
       const pmrem=new THREE.PMREMGenerator(renderer),environment=pmrem.fromEquirectangular(texture);
       // HDR supplies broad sky irradiance/reflections in addition to the sun.
-      scene.environment=environment.texture;scene.environmentIntensity=.68;
+      scene.environment=environment.texture;scene.environmentIntensity=.58;
       scene.background=texture;scene.backgroundIntensity=1.1;scene.backgroundBlurriness=0;pmrem.dispose();invalidate();
     });
     this.ready=Promise.allSettled([...models,sky]).then(results=>{
@@ -145,6 +155,17 @@ export class SceneAssets {
   }
   private pbr(id:string,color:number,roughness:number,normalStrength:number,repeat=1){
     return new THREE.MeshStandardMaterial({color,roughness,map:this.texture(id,'color',repeat),normalMap:this.texture(id,'normal',repeat),roughnessMap:this.texture(id,'roughness',repeat),normalScale:new THREE.Vector2(normalStrength,normalStrength)});
+  }
+  treeMaterial(source:THREE.Material|THREE.Material[],level:number):THREE.Material|THREE.Material[]{
+    if(Array.isArray(source))return source.map(material=>this.treeMaterial(material,level) as THREE.Material);
+    const key=`${source.uuid}/${level}`;let material=this.treeMaterials.get(key);if(material)return material;
+    material=source.clone();material.onBeforeCompile=source.onBeforeCompile;material.customProgramCacheKey=source.customProgramCacheKey.bind(source);material.userData.sharedCC0=true;
+    treeLodFade(material,level,this.treeViewPosition);this.treeMaterials.set(key,material);return material;
+  }
+  treeDepthMaterial(source:THREE.Material,level:number){
+    const key=`${source.uuid}/${level}`;let material=this.treeDepthMaterials.get(key);if(material)return material;
+    material=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});material.userData.sharedCC0=true;
+    treeLodFade(material,level,this.treeViewPosition);this.treeDepthMaterials.set(key,material);return material;
   }
   clone(name:string){return this.models.get(name)?.clone(true);}
 }

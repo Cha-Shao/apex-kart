@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>APEX · CC0 素材与光照</title>
+<title>APEX · 素材来源与光照</title>
 <style>body{max-width:900px;margin:56px auto;padding:0 24px;background:#111513;color:#e5e8df;font:16px/1.85 system-ui}h1{font-size:28px}h2{font-size:20px;margin-top:32px}a{color:#e0cc76}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:12px 10px;border-bottom:1px solid #3a4037}small{color:#a9b0a2}code{font-size:13px}li{margin:10px 0}</style>
-<h1>CC0 素材与晴天光照</h1>
-<p>下列第三方模型、贴图与 HDR 均采用 CC0 1.0，可用于商业项目。素材已下载并随游戏本地提供，运行时不请求资源网站。各网站品牌、展示图和其他内容不属于本项目使用的素材。</p>
+<h1>素材来源与晴天光照</h1>
+<p>树木使用 Daniel Greenheck 的 EZ-Tree（MIT），树皮纹理及下列其他模型、贴图、HDR 使用 CC0 1.0。许可原文与处理清单见下方链接。素材随游戏本地提供，运行时不请求资源网站。各网站品牌、展示图和其他内容不属于本项目使用的素材。</p>
 <table><thead><tr><th>用途</th><th>原始资源</th><th>本地处理</th></tr></thead><tbody>
-<tr><td>阔叶树</td><td><a href="https://polyhaven.com/a/tree_small_02">Poly Haven · Tree Small 02</a></td><td>保留原叶片位置与 UV，转换为带透明遮罩的叶片；简化树干与枝条，另制远景 LOD。</td></tr>
-<tr><td>松树</td><td><a href="https://polyhaven.com/a/pine_sapling_small">Poly Haven · Pine Sapling Small</a></td><td>使用一个变体，减面、嵌入 WebP 贴图、制作远景 LOD。</td></tr>
+<tr><td>橡树、白蜡树、松树及灌木叶簇</td><td><a href="https://github.com/dgreenheck/ez-tree">EZ-Tree 1.1.0 · Daniel Greenheck · MIT</a></td><td>离线制作三类自然枝干和写实透明叶簇，导出近、中、远景 GLB；每份约 0.3–0.7 MB，512px 颜色贴图、256px 树皮法线。游戏不加载生成器；保留作者版权与 MIT 许可。</td></tr>
+<tr><td>树皮</td><td><a href="https://polyhaven.com/a/bark_brown_02">Poly Haven · Bark Brown 02 · CC0</a></td><td>EZ-Tree 附带的树皮颜色与 OpenGL 法线，缩小后嵌入模型。</td></tr>
 <tr><td>草坪</td><td><a href="https://ambientcg.com/view?id=Grass001">ambientCG · Grass001</a></td><td>颜色、OpenGL 法线、粗糙度，1K WebP，按米制铺设。</td></tr>
 <tr><td>赛道与缓冲区</td><td><a href="https://polyhaven.com/a/clean_asphalt">Poly Haven · Clean Asphalt</a></td><td>无明显裂缝的细颗粒沥青，配套颜色、OpenGL 法线及粗糙度；2.1 米尺度随机偏移、旋转混合，路面与缓冲区使用不同色调。</td></tr>
 <tr><td>建筑与维修区地面</td><td><a href="https://polyhaven.com/a/concrete_layers_02">Poly Haven · Concrete Layers 02</a></td><td>1K PBR 贴图。</td></tr>
@@ -19,10 +19,10 @@
 <tr><td>天空与环境反射</td><td><a href="https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky">Poly Haven · Kloofendal 48d Partly Cloudy (Pure Sky)</a></td><td>2K HDR、PMREM 环境光；方向光对准 HDR 中太阳的位置，独立生成实时阴影。</td></tr>
 </tbody></table>
 <h2>许可与处理记录</h2>
-<ul><li><a href="https://polyhaven.com/license">Poly Haven 素材许可</a></li><li><a href="https://docs.ambientcg.com/license/">ambientCG 素材许可</a></li><li><a href="/assets/cc0/Kenney-License.txt">资源包内原始 Kenney 许可</a></li><li><a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 Universal</a></li><li><a href="/assets/cc0/manifest.json">本地资源与修改清单 JSON</a></li></ul>
+<ul><li><a href="/assets/vegetation/EZ-Tree-LICENSE.txt">EZ-Tree · MIT 许可与作者版权</a></li><li><a href="/assets/vegetation/manifest.json">树木体积、面数与 LOD 清单 JSON</a></li><li><a href="https://polyhaven.com/license">Poly Haven 素材许可</a></li><li><a href="https://docs.ambientcg.com/license/">ambientCG 素材许可</a></li><li><a href="/assets/cc0/Kenney-License.txt">资源包内原始 Kenney 许可</a></li><li><a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 Universal</a></li><li><a href="/assets/cc0/manifest.json">CC0 资源与修改清单 JSON</a></li></ul>
 <h2>保留的原创部分</h2>
 <p>RB20 外观模型、Halo、悬挂、方向盘和仪表保持项目原有几何，升级车漆、反射、橡胶与碳纤维质感。驾驶员、起终点龙门、建筑、看台、旗帜及牌面仍使用项目生成的几何；建筑等大面替换了 PBR 材质。树木、车辆装饰不新增物理障碍。详见 <a href="/vehicle-credits.html">RB20 公开规格与模拟说明</a>。</p>
 <p>光照采用晴天日光、真实 HDR 环境反射、天空补光、局部跟随阴影与轻微距离雾霾；非光线追踪或实测赛场照明。地形高度场经保留原始节点的单调三次插值细分，渲染与物理使用相同细分高度场；路面和路肩按高度场三角面裁切，弯道可见轮廓以约 1.2 米间距加密，计时采样预算保持不变。</p>
-<p>路肩分块、浅接缝、倾斜和磨损通过材质法线与着色表达，底层保持连续网格，不建立逐块砖模型或凸起碰撞。草坪多尺度色差、割草方向、沥青骨料细节、修补与橡胶使用痕迹、车辆接触阴影均由项目程序生成。灌木复用 CC0 阔叶树的叶片，近景草叶及护栏、轮胎墙、广告牌和排水条为程序生成的氛围装饰，不是赛场实地测绘，也不新增物理障碍。散布房屋、孤立的沥青维修通道和路肩外侧青色条已移除，赛道覆盖顺序为黑沥青、白线、路肩、浅灰缓冲区。</p>
-<p><a href="/">← 返回游戏</a></p><small>资源整理日期：2026-11-16。</small>
+<p>路肩分块、浅接缝、倾斜和磨损通过材质法线与着色表达，底层保持连续网格，不建立逐块砖模型或凸起碰撞。草坪多尺度色差、割草方向、沥青骨料细节、修补与橡胶使用痕迹、车辆接触阴影均由项目程序生成。灌木复用 EZ-Tree 白蜡树的叶簇，近景草叶及护栏、轮胎墙、广告牌和排水条为程序生成的氛围装饰，不是赛场实地测绘，也不新增物理障碍。散布房屋、孤立的沥青维修通道和路肩外侧青色条已移除，赛道覆盖顺序为黑沥青、白线、路肩、浅灰缓冲区。</p>
+<p><a href="/">← 返回游戏</a></p><small>资源整理日期：2026-11-17。</small>
 </html>

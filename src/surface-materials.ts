@@ -123,7 +123,7 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
     const groundAlbedo=ground==='grass'?`
       vec2 lawnWorld=vMapUv*${metres.toFixed(4)};
       float lawnPatch=surfaceNoise(lawnWorld/22.0)*.6+surfaceNoise(lawnWorld/73.0+19.0)*.4;
-      diffuseColor.rgb*=mix(vec3(.84,.94,.74),vec3(1.06,1.04,.94),smoothstep(.15,.85,lawnPatch));
+      diffuseColor.rgb*=mix(vec3(.74,.87,.73),vec3(1.03,1.01,.88),smoothstep(.15,.85,lawnPatch));
       float lawnClumps=surfaceNoise(lawnWorld/3.6);
       float mowing=sin(dot(lawnWorld,vec2(.83,.56))*.8976+surfaceNoise(lawnWorld/120.0)*1.5);
       diffuseColor.rgb*=.97+lawnClumps*.06+mowing*.025;
@@ -162,7 +162,7 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       .replace('#include <normal_fragment_maps>',normalChunk)
       .replace('#include <lights_physical_fragment>',`#include <lights_physical_fragment>\nmaterial.specularColor*=${specular.toFixed(4)};material.specularF90*=${specular.toFixed(4)};`);
   };
-  material.customProgramCacheKey=()=>`stochastic-relief-v7-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${!!roadWear}-${albedoGain}`;
+  material.customProgramCacheKey=()=>`stochastic-relief-v8-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${!!roadWear}-${albedoGain}`;
   material.userData.stochastic=true;return material;
 }
 
@@ -258,6 +258,80 @@ export function gravelMaterial(){
   };
   const material=stochasticSurface(new THREE.MeshStandardMaterial({map:texture(colors,'color',true),normalMap:texture(normals,'normal'),roughnessMap:texture(roughness,'roughness'),normalScale:new THREE.Vector2(1.2,1.2),roughness:.97,envMapIntensity:.25}),metres,.12,{roughnessCenter:.96,sourceRoughness:.96,roughnessContrast:.6,roughnessMin:.9,roughnessMax:1,specular:.5});
   material.name='crushed-gravel-and-sand';return material;
+}
+
+/** Dry road paint follows the asphalt grain instead of reading as a white decal. */
+export function roadPaintMaterial(normalMap:THREE.Texture){
+  const material=new THREE.MeshStandardMaterial({color:0xbab9ad,normalMap,normalScale:new THREE.Vector2(.3,.3),roughness:.97,metalness:0,envMapIntensity:.18});
+  material.name='worn-grey-white-road-paint';
+  material.onBeforeCompile=shader=>{
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vPaintPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nvPaintPosition=position.xz;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nvarying vec2 vPaintPosition;\n${stochasticGLSL}`)
+      .replace('#include <map_fragment>',`#include <map_fragment>
+        float paintDirt=surfaceNoise(vPaintPosition*.7+19.0);
+        float paintDetail=1.0-smoothstep(.08,.35,max(fwidth(vPaintPosition.x),fwidth(vPaintPosition.y)));
+        float paintWear=smoothstep(.64,.85,surfaceNoise(vPaintPosition*14.0))*paintDetail;
+        diffuseColor.rgb*=.84+.16*paintDirt;
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.065,.071,.07),paintWear*.32);
+      `)
+      .replace('#include <lights_physical_fragment>','#include <lights_physical_fragment>\nmaterial.specularColor*=.35;material.specularF90*=.4;');
+  };
+  material.customProgramCacheKey=()=>'worn-road-paint-v1';return material;
+}
+
+/** Clamp the sampled roughness too: roughness=1 still multiplies the source map. */
+export function matteFoliage(material:THREE.MeshStandardMaterial,volume=false){
+  material.transparent=false;material.alphaTest=.45;material.alphaHash=false;material.alphaToCoverage=false;material.depthWrite=true;material.side=THREE.DoubleSide;
+  material.metalness=0;material.roughness=1;material.envMapIntensity=.42;material.normalScale.set(.18,.18);material.color.multiply(new THREE.Color(0xe0e9d5));
+  material.onBeforeCompile=shader=>{
+    shader.vertexShader=shader.vertexShader
+      .replace('#include <common>',`#include <common>\n${volume?'#define CANOPY_VOLUME\n':''}#ifdef CANOPY_VOLUME\nattribute float canopyOcclusion;varying float vCanopyOcclusion;\n#endif`)
+      .replace('#include <begin_vertex>','#include <begin_vertex>\n#ifdef CANOPY_VOLUME\nvCanopyOcclusion=canopyOcclusion;\n#endif');
+    shader.fragmentShader=shader.fragmentShader
+      .replace('#include <common>',`#include <common>\n${volume?'#define CANOPY_VOLUME\n':''}#ifdef CANOPY_VOLUME\nvarying float vCanopyOcclusion;\n#endif`)
+      .replace('#include <map_fragment>',`#include <map_fragment>
+        #ifdef CANOPY_VOLUME
+        float canopyAccess=clamp(vCanopyOcclusion,.18,1.0);
+        diffuseColor.rgb*=mix(vec3(.84,.94,.9),vec3(1.0,.99,.91),smoothstep(.22,.95,canopyAccess));
+        #endif
+      `)
+      // Volume normals point out of the canopy, independent of which side of
+      // the carrier card the camera sees. Keep normal-map handedness intact.
+      .replace('#include <normal_fragment_begin>',THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;','#ifndef CANOPY_VOLUME\nnormal *= faceDirection;\n#endif'))
+      .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=clamp(.9+roughnessFactor*.1,.9,1.0);')
+      .replace('#include <lights_physical_fragment>','#include <lights_physical_fragment>\nmaterial.specularColor*=.22;material.specularF90*=.28;')
+      .replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+        #ifdef CANOPY_VOLUME
+        // Bound ambient occlusion so shaded leaf colour survives. Sunlight
+        // already has shadow-map occlusion and must not be darkened twice.
+        float canopySkyAccess=.58+.42*canopyAccess;
+        reflectedLight.indirectDiffuse*=canopySkyAccess;
+        reflectedLight.indirectSpecular*=canopySkyAccess;
+        // Thin foliage also receives broad sky through its reverse side.
+        // Sample the real scene's sky for a material-coloured illumination
+        // floor, rather than letting downward normals sample only dark ground.
+        vec3 canopySkyIrradiance=getAmbientLightIrradiance(ambientLightColor);
+        #if NUM_HEMI_LIGHTS > 0
+        #pragma unroll_loop_start
+        for(int i=0;i<NUM_HEMI_LIGHTS;i++){
+          canopySkyIrradiance+=getHemisphereLightIrradiance(hemisphereLights[i],hemisphereLights[i].direction);
+        }
+        #pragma unroll_loop_end
+        #endif
+        #if defined(USE_ENVMAP) && defined(STANDARD) && defined(ENVMAP_TYPE_CUBE_UV)
+        canopySkyIrradiance+=getIBLIrradiance(normalize((viewMatrix*vec4(0.0,1.0,0.0,0.0)).xyz));
+        #endif
+        vec3 canopyFill=canopySkyIrradiance*BRDF_Lambert(material.diffuseColor)*(.5+.15*canopyAccess);
+        reflectedLight.indirectDiffuse=max(reflectedLight.indirectDiffuse,canopyFill);
+        #if NUM_DIR_LIGHTS == 1
+        float canopyRim=pow(1.0-abs(dot(geometryNormal,geometryViewDir)),2.0);
+        float leafBacklight=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.0),3.0);
+        reflectedLight.directDiffuse+=diffuseColor.rgb*directLight.color*(.018*canopyRim*leafBacklight*canopyAccess*canopyAccess);
+        #endif
+        #endif
+      `);
+  };
+  material.customProgramCacheKey=()=>`volume-matte-canopy-v4-${volume}`;return material;
 }
 
 /** Matte painted concrete with inner-edge grime and racing-line tyre deposits. */

@@ -12,12 +12,14 @@ import { SceneAssets, surfaceUVs, disposeSceneGroup } from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
 import {drapeTriangles} from './terrain-mesh';
 import {tyreGeometry,GRAVEL_TEXTURE_METRES} from './surface-materials';
-import {ContactShadow} from './contact-shadow';
+import {ContactShadow,addGroundContactShadows} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
 import {START_LIGHT_COUNT} from './start-signal';
 import {startGridSlots} from './start-grid';
 import {TerrainWater} from './terrain-water';
 import {coastalTerrain} from './coastal-terrain';
+import {TreeLOD} from './tree-lod';
+import {TREE_MODELS} from './foliage';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -54,7 +56,7 @@ export class GameScene {
   private sunCenter=new THREE.Vector3();
   private shadowCenter=new THREE.Vector3(Infinity,Infinity,Infinity);
   private shadowExtent=0;
-  private treeLODs:THREE.LOD[]=[];
+  private treeLODs:TreeLOD[]=[];
   private detailLayers:DetailLayer[]=[];
   private contactShadow=new ContactShadow();
   private surfaceDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true});
@@ -76,9 +78,9 @@ export class GameScene {
     this.scene.background=new THREE.Color(0xb9d7ed);this.scene.fog=new THREE.FogExp2(0xbfcfd5,ENVIRONMENT_FOG_DENSITY);
     // Open-sky diffuse light and ground bounce must remain visible on faces
     // opposite the sun. A small neutral fill keeps deep shade from crushing.
-    const hemi=new THREE.HemisphereLight(0xd9e8ff,0x8d927c,.85);hemi.name='daylight-sky-and-ground-bounce';
-    const ambient=new THREE.AmbientLight(0xe1e8ee,.12);ambient.name='daylight-ambient-fill';this.scene.add(hemi,ambient);
-    const sun=this.sun;sun.name='HDR-aligned-direct-sun';sun.position.set(-500,780,350);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-225,right:225,top:225,bottom:-225,near:1,far:1800});sun.shadow.normalBias=.018;sun.shadow.bias=-.00006;sun.shadow.radius=2;this.scene.add(sun,sun.target);
+    const hemi=new THREE.HemisphereLight(0xd9e8ff,0x8d927c,.65);hemi.name='daylight-sky-and-ground-bounce';
+    const ambient=new THREE.AmbientLight(0xe1e8ee,.085);ambient.name='daylight-ambient-fill';this.scene.add(hemi,ambient);
+    const sun=this.sun;sun.name='HDR-aligned-direct-sun';sun.position.set(-500,780,350);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-225,right:225,top:225,bottom:-225,near:1,far:1800});sun.shadow.normalBias=.012;sun.shadow.bias=-.000025;sun.shadow.radius=2;this.scene.add(sun,sun.target);
     this.assets=new SceneAssets(this.renderer,this.scene,()=>{this.renderer.shadowMap.needsUpdate=true;});
     this.surfaceDepthMaterial.userData.sharedCC0=true;
     const floorGeometry=new THREE.PlaneGeometry(200000,200000);floorGeometry.setAttribute('color',new THREE.Float32BufferAttribute(new Array(12).fill(1),3));const uv=floorGeometry.getAttribute('uv');for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*100000,uv.getY(i)*100000);
@@ -161,7 +163,7 @@ export class GameScene {
     for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material]){m.depthWrite=false;m.depthTest=true;m.polygonOffset=true;m.polygonOffsetFactor=-1;m.polygonOffsetUnits=-2;}
     mesh.name=name;mesh.renderOrder=order;mesh.receiveShadow=true;this.circuit.add(depth,mesh);return mesh;
   }
-  private ribbon(track:TrackData,offset:number,width:number,color:number,road=false){
+  private ribbon(track:TrackData,offset:number,width:number,road=false){
     const positions:number[]=[],indices:number[]=[],roadUvs:number[]=[],n=track.samples.length;
     for(let i=0;i<n;i++){const j=(i+1)%n,a=track.samples[i],b=track.samples[j],points=[];
       for(const [s,o] of [[a,offset-width/2],[a,offset+width/2],[b,offset-width/2],[b,offset+width/2]] as const)points.push({x:s.x+s.nx*o,z:s.z+s.nz*o});
@@ -171,7 +173,7 @@ export class GameScene {
       if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral);}
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);
-    const surfaceMaterial=road?this.assets.asphalt:material(color);if(road){surfaceUVs(geo,2.1);geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));}
+    const surfaceMaterial=road?this.assets.asphalt:this.assets.roadPaint;surfaceUVs(geo,2.1);if(road)geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));
     return this.addSurface(new THREE.Mesh(geo,surfaceMaterial),road?SURFACE_ORDER.asphalt:SURFACE_ORDER.white,road?'track-asphalt':'track-white-line');
   }
   private box(group:THREE.Group,x:number,y:number,z:number,w:number,h:number,d:number,color:number){
@@ -204,7 +206,7 @@ export class GameScene {
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();if(!track.bridges.length)terrainNormals(geometry,this.terrain);
     // A colour overlay on the asphalt, with normal depth occlusion and no
     // raised geometry, collision bodies or shadows from painted markings.
-    this.addSurface(new THREE.Mesh(geometry,material(0xf2f1e6)),SURFACE_ORDER.start,'start-grid-paint');
+    surfaceUVs(geometry,2.1);this.addSurface(new THREE.Mesh(geometry,this.assets.roadPaint),SURFACE_ORDER.start,'start-grid-paint');
   }
   setStartLights(litCount:number){
     this.startLightMaterials.forEach((lamp,i)=>{const lit=i<litCount;lamp.color.setHex(lit?0xff493d:0x321b19);lamp.emissive.setHex(lit?0xff1c0c:0x000000);lamp.emissiveIntensity=lit?2.4:0;});
@@ -234,10 +236,10 @@ export class GameScene {
     // Asphalt has top priority, with exact slots for its own white lines. A
     // different road section can therefore cover a conflicting line or kerb.
     const lineWidth=.13,lineOffset=half-.24,lineInner=lineOffset-lineWidth*.5,lineOuter=lineOffset+lineWidth*.5,edgeWidth=half-lineOuter;
-    this.ribbon(rendered,0,lineInner*2,0x414b4b,true);
+    this.ribbon(rendered,0,lineInner*2,true);
     for(const side of [-1,1]){
-      this.ribbon(rendered,side*(lineOuter+edgeWidth*.5),edgeWidth,0x414b4b,true);
-      this.ribbon(rendered,side*lineOffset,lineWidth,0xe5e8d7);
+      this.ribbon(rendered,side*(lineOuter+edgeWidth*.5),edgeWidth,true);
+      this.ribbon(rendered,side*lineOffset,lineWidth);
     }
     const data=curbGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(data.vertices,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));geo.setAttribute('kerbUv',new THREE.Float32BufferAttribute(data.kerbUvs,2));geo.setAttribute('kerbTraffic',new THREE.Float32BufferAttribute(data.kerbTraffic,1));geo.setIndex(data.indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);surfaceUVs(geo,1.2);this.addSurface(new THREE.Mesh(geo,this.assets.kerb),SURFACE_ORDER.kerb,'textured-kerbs');
     // White surface paint and an APEX gantry aligned to the start tangent.
@@ -279,25 +281,26 @@ export class GameScene {
   private addScenery(){
     this.treeLODs=[];this.detailLayers=[];
     const b=this.track.bounds;
-    const land=this.water?.allowsScenery??(()=>true);
+    const land=(p:{x:number;z:number},margin=0)=>p.x-margin>=this.terrain.originX&&p.x+margin<=this.terrain.originX+this.terrain.size&&p.z-margin>=this.terrain.originZ&&p.z+margin<=this.terrain.originZ+this.terrain.size&&(this.water?.allowsScenery(p,margin)??true);
     const {trees,shrubs}=vegetationLayout(this.track,land);
     const dummy=new THREE.Object3D();
-    const treeModels=['tree_small_02','pine_sapling_small'];
-    if(treeModels.every(name=>this.assets.models.has(name)&&this.assets.models.has(`${name}-far`))){
-      for(let variant=0;variant<2;variant++){
-        const subset=trees.filter(t=>t.variant%2===variant),cells=new Map<string,typeof trees>();
-        for(const tree of subset){const key=`${Math.floor(tree.x/90)},${Math.floor(tree.z/90)}`;const cell=cells.get(key)??[];cell.push(tree);cells.set(key,cell);}
+    const treeModels=TREE_MODELS;
+    if(treeModels.every(name=>['','-mid','-far'].every(suffix=>this.assets.models.has(`${name}${suffix}`)))){
+      for(let variant=0;variant<treeModels.length;variant++){
+        const subset=trees.filter(t=>t.variant===variant),cells=new Map<string,typeof trees>();
+        for(const tree of subset){const key=`${Math.floor(tree.x/32)},${Math.floor(tree.z/32)}`;const cell=cells.get(key)??[];cell.push(tree);cells.set(key,cell);}
         for(const cell of cells.values()){
-        const lod=new THREE.LOD(),cx=cell.reduce((sum,t)=>sum+t.x,0)/cell.length,cz=cell.reduce((sum,t)=>sum+t.z,0)/cell.length;lod.position.set(cx,this.terrain.sample(cx,cz),cz);lod.autoUpdate=false;this.treeLODs.push(lod);this.scenery.add(lod);
-        for(const [level,suffix] of ['','-far'].entries()){
-        const model=this.assets.models.get(`${treeModels[variant]}${suffix}`)!,batch=new THREE.Group();model.updateMatrixWorld(true);
+        const cx=cell.reduce((sum,t)=>sum+t.x,0)/cell.length,cz=cell.reduce((sum,t)=>sum+t.z,0)/cell.length,cy=this.terrain.sample(cx,cz);
+        const radius=Math.max(...cell.map(t=>Math.hypot(t.x-cx,this.terrain.sample(t.x,t.z)-cy-.04,t.z-cz))),lod=new TreeLOD(radius);lod.position.set(cx,cy,cz);this.treeLODs.push(lod);this.scenery.add(lod);
+        for(const [level,suffix] of ['','-mid','-far'].entries()){
+        const model=this.assets.models.get(`${treeModels[variant]}${suffix}`)!,batch=lod.levels[level];model.updateMatrixWorld(true);
         model.traverse(source=>{
           if(!(source instanceof THREE.Mesh))return;
-          const instances=new THREE.InstancedMesh(source.geometry,source.material,cell.length);instances.name=`CC0 ${treeModels[variant]}${suffix}`;
-          cell.forEach((t,i)=>{const scale=t.scale*(variant===0?1.8:2.4);dummy.position.set(t.x-cx,this.terrain.sample(t.x,t.z)-lod.position.y-.04,t.z-cz);dummy.rotation.set(0,t.x*13.7,0);dummy.scale.set(scale,scale*t.stretch,scale);dummy.updateMatrix();instances.setMatrixAt(i,new THREE.Matrix4().multiplyMatrices(dummy.matrix,source.matrixWorld));});
-          instances.castShadow=level===0;instances.receiveShadow=true;instances.computeBoundingSphere();batch.add(instances);
+          const instances=new THREE.InstancedMesh(source.geometry,this.assets.treeMaterial(source.material,level),cell.length);instances.name=`CC0 ${treeModels[variant]}${suffix}`;
+          instances.customDepthMaterial=this.assets.treeDepthMaterial(Array.isArray(source.material)?source.material[0]:source.material,level);
+          cell.forEach((t,i)=>{const scale=t.scale;dummy.position.set(t.x-cx,this.terrain.sample(t.x,t.z)-lod.position.y-.04,t.z-cz);dummy.rotation.set(0,t.x*13.7,0);dummy.scale.set(scale,scale*t.stretch,scale);dummy.updateMatrix();instances.setMatrixAt(i,new THREE.Matrix4().multiplyMatrices(dummy.matrix,source.matrixWorld));const tint=new THREE.Color().setHSL(.23+(Math.sin(t.x*.71+t.z)*.5+.5)*.035,.12,.86+(Math.sin(t.z*.37)*.5+.5)*.1);instances.setColorAt(i,tint);});
+          instances.castShadow=true;instances.receiveShadow=true;instances.computeBoundingSphere();batch.add(instances);
         });
-        lod.addLevel(batch,level===0?0:115,.15);
         }
         }
       }
@@ -334,6 +337,7 @@ export class GameScene {
       const prop=this.assets.clone(name);if(!prop)continue;prop.name=`CC0 ${name}`;prop.position.set(x,this.terrain.sample(x,z)+.035,z);prop.scale.setScalar(scale);prop.rotation.y=name==='truck'?Math.PI/2:Math.PI;this.scenery.add(prop);
     }
     this.detailLayers=addTrackEnvironment(this.scenery,this.track,this.terrain,this.assets,shrubs,land);
+    this.detailLayers.push(...addGroundContactShadows(this.scenery,this.terrain,trees.map(t=>({x:t.x,z:t.z,radiusX:t.scale*(t.variant===0?.8:.65),radiusZ:t.scale*(t.variant===0?.7:.55),strength:.3,angle:t.x*13.7})),'tree-root-contact-occlusion'));
   }
   frameTrack(){
     if(!this.track)return;const b=this.track.bounds;const center=new THREE.Vector3((b.minX+b.maxX)/2,(this.terrain.min+this.terrain.max)/2,(b.minZ+b.maxZ)/2);
@@ -409,7 +413,8 @@ export class GameScene {
     }
     this.tyreMarks.update();
     this.tyreSmoke.update(dt);
-    this.scene.updateMatrixWorld();for(const lod of this.treeLODs){lod.update(this.camera);const distance=lod.position.distanceTo(this.camera.position);lod.visible=this.mode==='orbit'||distance<1000;}
+    const treeViewMoved=this.assets.treeViewPosition.distanceToSquared(this.camera.position)>.0004;this.assets.treeViewPosition.copy(this.camera.position);
+    this.scene.updateMatrixWorld();for(const lod of this.treeLODs){const changed=lod.update(this.camera.position),distance=lod.position.distanceTo(this.camera.position);lod.visible=this.mode==='orbit'||distance<1000;if(lod.visible&&(changed||treeViewMoved&&lod.transitioning))this.renderer.shadowMap.needsUpdate=true;}
     for(const layer of this.detailLayers)layer.object.visible=layer.center.distanceToSquared(this.camera.position)<layer.distance*layer.distance;
     this.contactShadow.update(this.physics);
     this.updateSun();

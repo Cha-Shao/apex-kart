@@ -18,19 +18,34 @@ const grassOnly=(track:TrackData,p:Point,margin:number)=>{if(Math.abs(p.x+12)<65
 
 /** Patches with clearings and understorey, rather than a uniform random field. */
 export function vegetationLayout(track:TrackData,land:LandPlacement=()=>true){
-  const random=seeded(7319),trees:VegetationPoint[]=[],shrubs:VegetationPoint[]=[],count=track.length>2000?24:14,n=track.samples.length;
+  const random=seeded(7319),trees:VegetationPoint[]=[],shrubs:VegetationPoint[]=[],count=Math.max(24,Math.min(96,Math.ceil(track.length/65))),n=track.samples.length;
+  const cells=new Map<string,VegetationPoint[]>(),cellSize=10;
+  const plantTree=(x:number,z:number)=>{
+    if(trees.length>=1200||!land({x,z},6)||!grassOnly(track,{x,z},8))return;
+    const cx=Math.floor(x/cellSize),cz=Math.floor(z/cellSize),spacing=6+random()*2;
+    for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)if(cells.get(`${cx+dx},${cz+dz}`)?.some(t=>(t.x-x)**2+(t.z-z)**2<spacing*spacing))return;
+    const species=random(),tree={x,z,scale:.78+random()*.44,stretch:.9+random()*.24,variant:species<.65?0:species<.93?1:2},key=`${cx},${cz}`,cell=cells.get(key)??[];
+    trees.push(tree);cell.push(tree);cells.set(key,cell);
+  };
   for(let cluster=0;cluster<count;cluster++){
-    const i=Math.floor((cluster+.25+random()*.5)/count*n)%n,s=track.samples[i],side=cluster%2?1:-1,offset=edge(track,i,side)+24+random()*26,cx=s.x+s.nx*offset*side,cz=s.z+s.nz*offset*side,radius=12+random()*19;
-    const population=7+Math.floor(random()*7);
+    const i=Math.floor((cluster+.25+random()*.5)/count*n)%n,s=track.samples[i],side=cluster%2?1:-1,offset=edge(track,i,side)+(cluster%3===0?43:20)+random()*24,cx=s.x+s.nx*offset*side,cz=s.z+s.nz*offset*side,radius=16+random()*18;
+    const population=16+Math.floor(random()*10);
     for(let k=0;k<population;k++){
       const angle=random()*Math.PI*2,r=Math.sqrt(random())*radius,x=cx+Math.cos(angle)*r,z=cz+Math.sin(angle)*r;
-      if(!land({x,z},4)||!grassOnly(track,{x,z},13)||trees.some(t=>(t.x-x)**2+(t.z-z)**2<10))continue;
-      trees.push({x,z,scale:.6+random()*.9,stretch:.85+random()*.5,variant:Math.floor(random()*3)});
+      plantTree(x,z);
     }
-    for(let k=0;k<3;k++){
+    for(let k=0;k<9;k++){
       const angle=random()*Math.PI*2,r=random()*radius*1.15,x=cx+Math.cos(angle)*r,z=cz+Math.sin(angle)*r;
-      if(land({x,z},2)&&grassOnly(track,{x,z},6))shrubs.push({x,z,scale:.22+random()*.2,stretch:.65+random()*.35,variant:0});
+      if(land({x,z},2)&&grassOnly(track,{x,z},4))shrubs.push({x,z,scale:.32+random()*.22,stretch:.65+random()*.3,variant:0});
     }
+  }
+  // Patchy woodland beyond the circuit fills the horizon without filling the
+  // infield with a uniform grid. The same land/runoff exclusions apply here.
+  const b=track.bounds,cx=(b.minX+b.maxX)*.5,cz=(b.minZ+b.maxZ)*.5,rx=(b.maxX-b.minX)*.5+48,rz=(b.maxZ-b.minZ)*.5+48;
+  const perimeterClusters=Math.min(48,Math.max(16,Math.ceil((rx+rz)/24)));
+  for(let cluster=0;cluster<perimeterClusters;cluster++){
+    const angle=(cluster+.2+random()*.6)/perimeterClusters*Math.PI*2,x=cx+Math.cos(angle)*rx,z=cz+Math.sin(angle)*rz;
+    for(let k=0;k<15;k++){const a=random()*Math.PI*2,r=Math.sqrt(random())*24;plantTree(x+Math.cos(a)*r,z+Math.sin(a)*r);}
   }
   return {trees,shrubs};
 }
@@ -80,10 +95,10 @@ function grassBlades(){
 }
 
 function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],layers:DetailLayer[],land:LandPlacement){
-  const random=seeded(813),grassCells=new Map<string,Placement[]>(),count=Math.min(300,Math.ceil(track.length/16)),n=track.samples.length;
+  const random=seeded(813),grassCells=new Map<string,Placement[]>(),count=Math.min(380,Math.ceil(track.length/12)),n=track.samples.length;
   for(let i=0;i<count;i++){
     const index=Math.floor(i/count*n),s=track.samples[index];
-    for(const side of [-1,1])for(let k=0;k<4;k++){
+    for(const side of [-1,1])for(let k=0;k<6;k++){
       const offset=(edge(track,index,side)+.3+random()*2.1)*side,x=s.x+s.nx*offset+s.tx*(random()-.5)*10,z=s.z+s.nz*offset+s.tz*(random()-.5)*10;
       if(!land({x,z},.4)||!grassOnly(track,{x,z},.1))continue;
       const key=`${Math.floor(x/70)},${Math.floor(z/70)}`,cell=grassCells.get(key)??[],scale=.65+random()*.65;
@@ -92,7 +107,7 @@ function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
   }
   const bladeMaterial=new THREE.MeshLambertMaterial({color:0xffffff,vertexColors:true,side:THREE.DoubleSide});
   for(const cell of grassCells.values())detail(layers,instances(group,grassBlades(),bladeMaterial,cell,'close-grass-tufts'),95);
-  const model=assets.models.get('tree_small_02-far');if(!model)return;model.updateMatrixWorld(true);
+  const model=assets.models.get('ash-far');if(!model)return;model.updateMatrixWorld(true);
   model.traverse(source=>{
     if(!(source instanceof THREE.Mesh)||Array.isArray(source.material)||!source.material.name.includes('leaves'))return;
     source.geometry.computeBoundingBox();const minY=source.geometry.boundingBox?.min.y??0;
@@ -100,7 +115,7 @@ function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
     for(const shrub of shrubs){const key=`${Math.floor(shrub.x/140)},${Math.floor(shrub.z/140)}`,cell=cells.get(key)??[],sy=shrub.scale*shrub.stretch;
       cell.push({x:shrub.x,y:terrain.sample(shrub.x,shrub.z)-minY*sy-.06,z:shrub.z,sx:shrub.scale*1.4,sy,sz:shrub.scale*1.4,ry:shrub.x*1.7});cells.set(key,cell);
     }
-    for(const cell of cells.values())detail(layers,instances(group,source.geometry,source.material,cell,'CC0 understorey shrubs'),500);
+    for(const cell of cells.values())detail(layers,instances(group,source.geometry,source.material,cell,'ash understorey shrubs'),330);
   });
 }
 

@@ -10,6 +10,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "tsx --test tests/*.test.ts",
     "assets:prepare": "node scripts/prepare-cc0-assets.mjs",
+    "assets:vegetation": "node scripts/prepare-vegetation.mjs",
     "check:scene": "node scripts/check-cc0-scene.mjs"
   },
   "dependencies": {

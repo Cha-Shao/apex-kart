@@ -1,0 +1,113 @@
+{
+  "license": "MIT; bark textures CC0-1.0",
+  "assets": [
+    {
+      "id": "oak",
+      "source": "https://github.com/dgreenheck/ez-tree",
+      "version": "1.1.0",
+      "author": "Daniel Greenheck",
+      "license": "MIT",
+      "licenseFile": "EZ-Tree-LICENSE.txt",
+      "files": [
+        "oak.glb",
+        "oak-mid.glb",
+        "oak-far.glb"
+      ],
+      "height": 11,
+      "seed": 35729,
+      "lods": [
+        {
+          "file": "oak.glb",
+          "bytes": 650044,
+          "triangles": 6726
+        },
+        {
+          "file": "oak-mid.glb",
+          "bytes": 425636,
+          "triangles": 3109
+        },
+        {
+          "file": "oak-far.glb",
+          "bytes": 310892,
+          "triangles": 1453
+        }
+      ],
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Generator and source archive are not shipped."
+    },
+    {
+      "id": "ash",
+      "source": "https://github.com/dgreenheck/ez-tree",
+      "version": "1.1.0",
+      "author": "Daniel Greenheck",
+      "license": "MIT",
+      "licenseFile": "EZ-Tree-LICENSE.txt",
+      "files": [
+        "ash.glb",
+        "ash-mid.glb",
+        "ash-far.glb"
+      ],
+      "height": 10.5,
+      "seed": 36330,
+      "lods": [
+        {
+          "file": "ash.glb",
+          "bytes": 698648,
+          "triangles": 7612
+        },
+        {
+          "file": "ash-mid.glb",
+          "bytes": 434668,
+          "triangles": 3529
+        },
+        {
+          "file": "ash-far.glb",
+          "bytes": 306684,
+          "triangles": 1676
+        }
+      ],
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Generator and source archive are not shipped."
+    },
+    {
+      "id": "pine",
+      "source": "https://github.com/dgreenheck/ez-tree",
+      "version": "1.1.0",
+      "author": "Daniel Greenheck",
+      "license": "MIT",
+      "licenseFile": "EZ-Tree-LICENSE.txt",
+      "files": [
+        "pine.glb",
+        "pine-mid.glb",
+        "pine-far.glb"
+      ],
+      "height": 12.5,
+      "seed": 13977,
+      "lods": [
+        {
+          "file": "pine.glb",
+          "bytes": 570160,
+          "triangles": 5375
+        },
+        {
+          "file": "pine-mid.glb",
+          "bytes": 399056,
+          "triangles": 2398
+        },
+        {
+          "file": "pine-far.glb",
+          "bytes": 316952,
+          "triangles": 1110
+        }
+      ],
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Generator and source archive are not shipped."
+    }
+  ],
+  "barkSource": {
+    "url": "https://polyhaven.com/a/bark_brown_02",
+    "license": "CC0-1.0"
+  },
+  "budgets": {
+    "maxGlbBytes": 1048576,
+    "colorTextureSize": 512,
+    "barkNormalSize": 256
+  }
+}

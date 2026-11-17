@@ -1,5 +1,38 @@
 import * as THREE from 'three';
 import type {KartPhysics} from './physics';
+import type {TerrainField} from './terrain';
+import type {DetailLayer} from './track-environment';
+import {drapeTriangles} from './terrain-mesh';
+
+export interface GroundContact {x:number;z:number;radiusX:number;radiusZ:number;strength:number;angle?:number}
+
+/** Small terrain-draped root/footing occlusion; sunlight supplies the canopy. */
+export function addGroundContactShadows(group:THREE.Group,terrain:TerrainField,contacts:GroundContact[],name:string):DetailLayer[]{
+  if(!contacts.length)return [];
+  const cells=new Map<string,GroundContact[]>(),layers:DetailLayer[]=[];
+  for(const p of contacts){const key=`${Math.floor(p.x/70)},${Math.floor(p.z/70)}`,cell=cells.get(key)??[];cell.push(p);cells.set(key,cell);}
+  const material=new THREE.MeshBasicMaterial({color:0x17231b,vertexColors:true,transparent:true,depthTest:true,depthWrite:false,toneMapped:false});
+  for(const cell of cells.values()){
+    const positions:number[]=[],colors:number[]=[],indices:number[]=[];
+    for(const p of cell){
+      const c=Math.cos(p.angle??0),s=Math.sin(p.angle??0),triangles:{x:number;z:number}[][]=[],point=(radius:number,angle:number)=>{const x=Math.cos(angle)*radius*p.radiusX,z=Math.sin(angle)*radius*p.radiusZ;return{x:p.x+c*x-s*z,z:p.z+s*x+c*z};};
+      for(let i=0;i<8;i++){
+        const a=i/8*Math.PI*2,b=(i+1)/8*Math.PI*2,innerA=point(.42,a),innerB=point(.42,b),outerA=point(1,a),outerB=point(1,b);
+        triangles.push([{x:p.x,z:p.z},innerA,innerB],[innerA,outerA,innerB],[innerB,outerA,outerB]);
+      }
+      const data=drapeTriangles(triangles,(x,z)=>terrain.sample(x,z)-.011,terrain),base=positions.length/3;
+      for(let i=0;i<data.vertices.length;i+=3){
+        const x=data.vertices[i],z=data.vertices[i+2],dx=x-p.x,dz=z-p.z,r=Math.hypot((c*dx+s*dz)/p.radiusX,(-s*dx+c*dz)/p.radiusZ),fade=1-THREE.MathUtils.smoothstep(r,0,1);
+        positions.push(x,data.vertices[i+1],z);colors.push(1,1,1,p.strength*fade);
+      }
+      for(const i of data.indices)indices.push(base+i);
+    }
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,4));geometry.setIndex(indices);geometry.computeBoundingSphere();
+    const mesh=new THREE.Mesh(geometry,material);mesh.name=name;mesh.renderOrder=2;group.add(mesh);
+    if(geometry.boundingSphere)layers.push({object:mesh,center:geometry.boundingSphere.center.clone(),distance:320+geometry.boundingSphere.radius});
+  }
+  return layers;
+}
 
 /** A cheap, local occlusion layer beneath the chassis, separate from sunlight. */
 export class ContactShadow {
