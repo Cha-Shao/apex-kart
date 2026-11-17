@@ -4,6 +4,7 @@ import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {CascadeSun} from './cascade-sun';
 import {TemporalMaterials} from './temporal-materials';
+import {SunLensFlare} from './sun-lens-flare';
 import {fullscreenVertex,volumeFragment,combineFragment,temporalFragment} from './daylight-post-shaders';
 
 function target(depth=false){
@@ -14,7 +15,7 @@ function post(fragmentShader:string,uniforms:Record<string,THREE.IUniform>){
 }
 function halton(index:number,base:number){let value=0,weight=1;while(index>0){weight/=base;value+=weight*(index%base);index=Math.floor(index/base);}return value;}
 
-/** Linear HDR -> GTAO + shadowed air -> motion-reprojected TAA -> ACES/sRGB.
+/** Linear HDR -> GTAO + shadowed air -> motion-reprojected TAA -> sun optics -> ACES/sRGB.
  * The scene renders once, preserving water, alpha coverage and overlay order. */
 export class DaylightPipeline {
   readonly sun:CascadeSun;
@@ -26,6 +27,7 @@ export class DaylightPipeline {
   private volumeTarget=target();
   private gtao:GTAOPass;
   private output=new OutputPass();
+  private flare:SunLensFlare;
   private quad=new FullScreenQuad();
   private volume:THREE.ShaderMaterial;
   private combine:THREE.ShaderMaterial;
@@ -58,6 +60,7 @@ export class DaylightPipeline {
     this.sceneTarget.textures[1].minFilter=this.sceneTarget.textures[1].magFilter=THREE.NearestFilter;
     this.sceneTarget.depthTexture=new THREE.DepthTexture(1,1,THREE.UnsignedIntType);
     this.sceneTarget.depthTexture.minFilter=this.sceneTarget.depthTexture.magFilter=THREE.NearestFilter;
+    this.flare=new SunLensFlare(this.sceneTarget.depthTexture,this.output);
     // Construct the addon's owned resources before switching to external
     // depth. Its r181 setGBuffer/setSize/dispose expect that owned target.
     this.gtao=new GTAOPass(scene,camera,1,1);this.gtao.setGBuffer(this.sceneTarget.depthTexture);
@@ -83,7 +86,7 @@ export class DaylightPipeline {
     this.output.material.fragmentShader=this.output.material.fragmentShader.replace(/}\s*$/,'gl_FragColor.a=1.0;\n}');
     this.output.renderToScreen=true;
   }
-  reset(){this.ready=false;this.frame=0;}
+  reset(){this.ready=false;this.frame=0;this.flare.reset();}
   resize(){
     const size=this.renderer.getDrawingBufferSize(new THREE.Vector2()),w=size.x,h=size.y;
     if(w===this.width&&h===this.height)return;
@@ -127,6 +130,7 @@ export class DaylightPipeline {
       this.temporal.uniforms.historyColour.value=this.history[1-this.write].texture;
       this.temporal.uniforms.historyReady.value=this.ready?1:0;
       this.draw(this.temporal,this.history[this.write]);
+      this.flare.render(this.renderer,this.camera,this.projection,sunDirection,time,this.width,this.height,this.scene.background instanceof THREE.Texture?this.scene.backgroundIntensity:0);
       this.output.render(this.renderer,this.combined,this.history[this.write],0,false);
       this.motion.commit(this.viewProjection,time);this.ready=true;this.write=1-this.write;this.frame++;
       this.previousPosition.copy(this.camera.position);this.previousRotation.copy(this.camera.quaternion);
@@ -135,7 +139,7 @@ export class DaylightPipeline {
     }
   }
   dispose(){
-    this.sun.dispose();this.sceneTarget.dispose();this.combined.dispose();this.history.forEach(t=>t.dispose());this.volumeTarget.dispose();
+    this.sun.dispose();this.flare.dispose();this.sceneTarget.dispose();this.combined.dispose();this.history.forEach(t=>t.dispose());this.volumeTarget.dispose();
     this.gtao.dispose();this.gtao.gtaoMaterial.dispose();this.gtao.blendMaterial.dispose();this.output.dispose();this.volume.dispose();this.combine.dispose();this.temporal.dispose();this.white.dispose();this.quad.dispose();
   }
 }

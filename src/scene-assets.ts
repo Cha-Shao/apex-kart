@@ -6,6 +6,7 @@ import {roadWearTexture} from './road-wear';
 import {TREE_ASSET_BASE,TREE_MODELS} from './foliage';
 import {treeLodFade} from './tree-lod';
 import {foliageCutoutTexture} from './foliage-cutout';
+import {treeLeafCoverage} from './tree-leaf-coverage';
 import {daylightSky} from './daylight';
 import type {TrackData} from './track';
 
@@ -105,7 +106,7 @@ export class SceneAssets {
     for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
     const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
     const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-lighting-2':groundcover?'?v=blue-noise-foliage-3':''}`);
+      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-coverage-3':groundcover?'?v=blue-noise-foliage-3':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
@@ -134,6 +135,9 @@ export class SceneAssets {
           const prepared=cutout?foliageCutoutTexture(texture,groundcover ? .4 : standard.alphaTest):texture;
           prepared.userData.sharedCC0=true;standard[slot]=prepared;this.textures.set(key,prepared);
           if(prepared!==texture)texture.dispose();
+        }
+        if(tree&&material instanceof THREE.MeshStandardMaterial&&/leaves|twig/.test(material.name)){
+          const coverage=treeLeafCoverage(material);if(coverage)this.textures.set(`embedded/${material.name}/canopyCoverage`,coverage);
         }
       }});
       this.models.set(name,gltf.scene);

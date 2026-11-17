@@ -46,14 +46,43 @@ function barkPrimitive(document,buffer,geometry,scale,uvScale){
     .setIndices(accessor(document,buffer,'SCALAR',new Uint16Array(geometry.index.array)));
 }
 
-function leafPrimitive(document,buffer,geometry,scale,level){
+/** Reduce nearby crossed-card pairs together, retaining a source anchor at
+ * every level. Each survivor carries its whole local cluster's leaf area. */
+function leafClusterLods(geometry){
+  const source=geometry.attributes.position.array,groups=[];
+  const vertex=index=>new THREE.Vector3().fromArray(source,index*3);
+  for(let start=0;start<source.length/3;start+=8){
+    const anchor=new THREE.Vector3();let area=0;
+    for(let j=0;j<8;j++)anchor.add(vertex(start+j));anchor.multiplyScalar(1/8);
+    for(const offset of [0,4])for(const triangle of [[0,1,2],[0,2,3]]){
+      const [a,b,c]=triangle.map(index=>vertex(start+offset+index));
+      area+=b.sub(a).cross(c.sub(a)).length()*.5;
+    }
+    groups.push({start,anchor,area});
+  }
+  const partition=(items,size)=>{
+    if(items.length<=size)return [items];
+    const bounds=new THREE.Box3().setFromPoints(items.map(group=>group.anchor)),extent=bounds.getSize(new THREE.Vector3());
+    const axis=extent.x>=extent.y&&extent.x>=extent.z?'x':extent.y>=extent.z?'y':'z';
+    const sorted=[...items].sort((a,b)=>a.anchor[axis]-b.anchor[axis]||a.start-b.start);
+    // Split on whole clusters so the triangle budget stays ceil(count/size).
+    const middle=Math.floor(Math.ceil(items.length/size)/2)*size;
+    return [...partition(sorted.slice(0,middle),size),...partition(sorted.slice(middle),size)];
+  };
+  const representative=items=>{
+    // The largest original pair limits enlargement to sqrt(cluster size).
+    const source=items.reduce((largest,item)=>item.area>largest.area||item.area===largest.area&&item.start<largest.start?item:largest),area=items.reduce((sum,item)=>sum+item.area,0);
+    return {...source,enlargement:Math.sqrt(area/Math.max(source.area,1e-8))};
+  };
+  const far=partition(groups,4),mid=far.flatMap(cluster=>partition(cluster,2));
+  return [groups.map(group=>representative([group])),mid.map(representative),far.map(representative)];
+}
+
+function leafPrimitive(document,buffer,geometry,scale,clusters){
   const source=geometry.attributes.position.array,sourceUv=geometry.attributes.uv.array,sourceNormal=geometry.attributes.normal.array,positions=[],normals=[],leafNormals=[],uvs=[],occlusion=[],indices=[];
   geometry.computeBoundingBox();const bounds=geometry.boundingBox,center=bounds.getCenter(new THREE.Vector3()),extent=bounds.getSize(new THREE.Vector3());
   const radii=extent.clone().multiplyScalar(.5).max(new THREE.Vector3(.1,.1,.1));
-  const stride=[1,2,4][level],enlargement=[1,1.18,1.42][level],groups=source.length/24;
-  // Keep crossed leaf-cluster pairs together and retain deterministic anchors.
-  for(let group=0;group<groups;group+=stride){
-    const start=group*8,anchor=new THREE.Vector3();for(let j=0;j<8;j++)anchor.add(new THREE.Vector3().fromArray(source,(start+j)*3));anchor.multiplyScalar(1/8);
+  for(const {start,anchor,enlargement} of clusters){
     const radial=anchor.clone().sub(center).divide(new THREE.Vector3(Math.max(extent.x,.1),Math.max(extent.y,.1),Math.max(extent.z,.1))),height=(anchor.y-bounds.min.y)/Math.max(extent.y,.1);
     // A bounded volume-access approximation, shared by all LODs, rather than
     // ray-traced AO. It only attenuates indirect light in the runtime shader.
@@ -87,9 +116,9 @@ export async function prepareVegetation({cache='test-results/asset-source',outpu
     preset.seed=seed;preset.leaves.count=id==='pine'?16:12;
     if(id==='pine'){preset.branch.children[0]=56;preset.branch.sections[1]=6;preset.branch.segments[1]=4;}
     else {preset.branch.children[0]=id==='oak'?5:6;preset.branch.children[1]=3;preset.branch.sections[0]=10;preset.branch.sections[1]=6;preset.branch.sections[2]=4;preset.branch.sections[3]=2;preset.branch.segments[0]=10;preset.branch.segments[1]=6;preset.branch.segments[2]=4;preset.branch.segments[3]=3;}
-    const tree=new Tree();tree.loadFromJson(preset);const bounds=new THREE.Box3().setFromObject(tree),scale=height/(bounds.max.y-bounds.min.y),files=[],lods=[];
+    const tree=new Tree();tree.loadFromJson(preset);const bounds=new THREE.Box3().setFromObject(tree),scale=height/(bounds.max.y-bounds.min.y),files=[],lods=[],leafLods=leafClusterLods(tree.leavesMesh.geometry);
     for(const [level,suffix] of ['','-mid','-far'].entries()){
-      const document=new Document(),buffer=document.createBuffer(),bark=barkPrimitive(document,buffer,tree.branchesMesh.geometry,scale,preset.bark.textureScale),leaves=leafPrimitive(document,buffer,tree.leavesMesh.geometry,scale,level);
+      const document=new Document(),buffer=document.createBuffer(),bark=barkPrimitive(document,buffer,tree.branchesMesh.geometry,scale,preset.bark.textureScale),leaves=leafPrimitive(document,buffer,tree.leavesMesh.geometry,scale,leafLods[level]);
       const barkMaterial=document.createMaterial(`${id}-bark`).setMetallicFactor(0).setRoughnessFactor(.94)
         .setBaseColorTexture(await texture(document,path.join(dir,'src/lib/assets/bark/oak_color_1k.jpg'),'oak-bark-color',512))
         .setNormalTexture(await texture(document,path.join(dir,'src/lib/assets/bark/oak_normal_1k.jpg'),'oak-bark-normal',256,false)).setNormalScale(.5);
@@ -102,9 +131,10 @@ export async function prepareVegetation({cache='test-results/asset-source',outpu
       await document.transform(dedup(),prune());
       const triangles=document.getRoot().listMeshes().reduce((sum,m)=>sum+m.listPrimitives().reduce((s,p)=>s+p.getIndices().getCount()/3,0),0),bytes=await io.writeBinary(document),file=`${id}${suffix}.glb`;
       if(bytes.byteLength>1024*1024)throw Error(`${file} exceeds the 1 MiB web asset budget (${bytes.byteLength} bytes)`);
-      await fs.writeFile(path.join(output,file),bytes);files.push(file);lods.push({file,bytes:bytes.byteLength,triangles});
+      const leafArea=leafLods[level].reduce((sum,group)=>sum+group.area*group.enlargement**2,0)*scale**2;
+      await fs.writeFile(path.join(output,file),bytes);files.push(file);lods.push({file,bytes:bytes.byteLength,triangles,leafClusters:leafLods[level].length,leafArea:Number(leafArea.toFixed(3))});
     }
-    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped.'});console.log(id,lods);
+    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; nested source anchors and local leaf-area compensation across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped.'});console.log(id,lods);
   }
   const manifest={license:'MIT; bark textures CC0-1.0',assets:records,barkSource:{url:'https://polyhaven.com/a/bark_brown_02',license:'CC0-1.0'},budgets:{maxGlbBytes:1024*1024,colorTextureSize:512,barkNormalSize:256}};
   await fs.writeFile(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');return records;
