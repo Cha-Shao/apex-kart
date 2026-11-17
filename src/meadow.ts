@@ -5,8 +5,9 @@ import {FootprintIndex,polygonDistance} from './track-footprint';
 import type {PlantModel} from './grass';
 import {meadowSeeds,vegetationGrowth} from './vegetation-distribution';
 import {vegetationEdgeDistance,vegetationEdgeWeight} from './vegetation-edge';
+import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
 
-const CELL=24,LOAD_RADIUS=168,KEEP_RADIUS=224;
+const CELL=24,LOAD_RADIUS=84,KEEP_RADIUS=112;
 type LandPlacement=(p:Point,margin?:number)=>boolean;
 export interface MeadowEdge {texture:THREE.DataTexture;bounds:THREE.Vector4}
 type MaterialFactory=(source:THREE.Material|THREE.Material[],model:PlantModel,level:number,birth:number,edge?:MeadowEdge)=>THREE.Material;
@@ -84,10 +85,12 @@ export class MeadowField extends THREE.Group {
         const mesh=new THREE.InstancedMesh(source.geometry,this.material(source.material,model,level,time,edge),placements.length);
         mesh.name=`meadow-tile-${x}-${z}-${index}-${level}`;mesh.position.copy(center);
         placements.forEach((p,i)=>{
-          dummy.position.set(p.x-center.x,p.y-center.y,p.z-center.z);dummy.rotation.set(0,p.rotation,0);dummy.scale.set(p.scale,p.stretch*Math.min(1,p.scale*1.1),p.scale*p.spread);dummy.updateMatrix();
+          // Narrow patches must fit between pavement and fence without also
+          // shrinking every leaf vertically into a ground-hugging carpet.
+          dummy.position.set(p.x-center.x,p.y-center.y,p.z-center.z);dummy.rotation.set(0,p.rotation,0);dummy.scale.set(p.scale,p.stretch,p.scale*p.spread);dummy.updateMatrix();
           mesh.setMatrixAt(i,dummy.matrix);mesh.setColorAt(i,p.tint);
         });
-        mesh.receiveShadow=true;mesh.computeBoundingSphere();
+        mesh.receiveShadow=true;mesh.renderOrder=VEGETATION_RENDER_ORDER;mesh.computeBoundingSphere();
         mesh.boundingSphere!.radius+=drape+.08;this.add(mesh);return mesh;
       });
       const radius=drape+Math.max(...placements.map(p=>Math.hypot(p.x-center.x,p.y-center.y,p.z-center.z)+model.radius*p.scale*Math.max(1,p.spread)+model.height*Math.max(p.scale,p.stretch)));
@@ -107,7 +110,7 @@ export class MeadowField extends THREE.Group {
 
   update(time:number,view:THREE.Vector3){
     const f=this.terrain;
-    if(Math.abs(view.y-f.sample(view.x,view.z))>160){
+    if(Math.abs(view.y-f.sample(view.x,view.z))>80){
       for(const tile of this.tiles.values())for(const batch of tile.batches)for(const mesh of batch.meshes)mesh.visible=false;
       return;
     }

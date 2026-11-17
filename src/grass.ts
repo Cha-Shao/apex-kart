@@ -6,6 +6,9 @@ import type {TerrainField} from './terrain';
 import {MeadowField,type MeadowEdge} from './meadow';
 import {vegetationGrowth} from './vegetation-distribution';
 import {vegetationEdgeWeight,VEGETATION_EDGE_REACH} from './vegetation-edge';
+import {vegetationPaletteGLSL} from './vegetation-palette';
+import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
+import {pavementPerimeter} from './guardrail-layout';
 
 const CELL_SIZE=24,WIND_REACH=.065;
 const GRASS=['grass-short-a','grass-short-b','grass-tall-a','grass-tall-b'] as const;
@@ -56,17 +59,21 @@ export class GrassField extends THREE.Group {
         height=Math.max(height,bounds.max.y-bounds.min.y);
       }
       const shrub=kind.startsWith('shrub'),weed=kind.startsWith('weed'),patch=kind.startsWith('meadow');
-      models.set(kind,{near,far,radius,height,patch,lodStart:patch?16:shrub?30:weed?15:12,lodEnd:patch?32:shrub?52:weed?28:24,fadeStart:patch?88:shrub?130:weed?58:48,fadeEnd:patch?136:shrub?195:weed?105:96});
+      models.set(kind,{near,far,radius,height,patch,lodStart:patch?8:shrub?15:weed?7.5:6,lodEnd:patch?16:shrub?26:weed?14:12,fadeStart:patch?44:shrub?65:weed?29:24,fadeEnd:patch?68:shrub?97.5:weed?52.5:48});
     }
     if(!models.size)return;
     const random=seeded(813),dense=surfaceTrack(track),n=dense.samples.length;
     const paved=new FootprintIndex([...roadFootprint(dense.samples,dense.features,dense.width),...dense.runoffRegions]);
+    // The same padded pavement union places both inner and outer fences.
+    // Its holes are outside the inner fence, not additional planting areas.
+    const fenceField=pavementPerimeter(track).field;
+    const fencedLand:LandPlacement=(p,margin=0)=>land(p,margin)&&fenceField.sample(p)+margin<=0;
     const meadowModels=MEADOW.map(kind=>models.get(kind)).filter((model):model is PlantModel=>!!model);
     if(meadowModels.length){
       const texture=new THREE.DataTexture(terrain.heights,terrain.resolution,terrain.resolution,THREE.RedFormat,THREE.FloatType);
       texture.name='meadow-shared-terrain-heights';texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;texture.needsUpdate=true;
       this.terrainHeights.value=texture;this.terrainGrid.value.set(terrain.originX,terrain.originZ,terrain.cellSize,terrain.resolution);
-      this.meadow=new MeadowField(track,terrain,land,paved,meadowModels,(source,model,level,birth,edge)=>this.plantMaterial(source,model,level,birth,edge));this.add(this.meadow);
+      this.meadow=new MeadowField(track,terrain,fencedLand,paved,meadowModels,(source,model,level,birth,edge)=>this.plantMaterial(source,model,level,birth,edge));this.add(this.meadow);
     }
     const placements=new Map<PlantKind,Map<string,Plant[]>>(),occupied=new Set<string>();
     const plant=(kind:PlantKind,x:number,z:number,scale:number,stretch=1,trimmed=false)=>{
@@ -76,6 +83,7 @@ export class GrassField extends THREE.Group {
       // Include the sideways reach of leaves on sloping banks, not just the
       // footprint of an upright source model.
       const p={x,z},clearance=(model.radius+model.height*stretch*slope/Math.hypot(1,slope)+WIND_REACH)*scale;
+      if(!kind.startsWith('shrub')&&fenceField.sample(p)+clearance>0)return;
       if(!land(p,clearance))return;
       if(Math.abs(x+12)<65&&z>track.bounds.maxZ+10&&z<track.bounds.maxZ+45)return;
       const reach=Math.max(clearance,VEGETATION_EDGE_REACH);let edgeDistance=reach;
@@ -84,7 +92,8 @@ export class GrassField extends THREE.Group {
       }
       if(!trimmed&&!kind.startsWith('shrub')){
         const growth=vegetationEdgeWeight(edgeDistance,x,z);if(random()>.12+.88*growth)return;
-        stretch*=.4+.6*growth;
+        // Density does most of the edge blending; keep ordinary grass upright.
+        stretch*=.82+.18*growth;
       }
       const spacing=kind.startsWith('shrub')?.8:.18,key=`${kind.startsWith('shrub')?'bush':'ground'}/${Math.floor(x/spacing)},${Math.floor(z/spacing)}`;
       if(occupied.has(key))return;
@@ -159,7 +168,7 @@ export class GrassField extends THREE.Group {
           });
           // No per-blade shadow draws or physics; opaque cutouts retain real
           // depth occlusion and receive the normal track/woodland shadows.
-          mesh.receiveShadow=true;mesh.computeBoundingSphere();this.add(mesh);return mesh;
+          mesh.receiveShadow=true;mesh.renderOrder=VEGETATION_RENDER_ORDER;mesh.computeBoundingSphere();this.add(mesh);return mesh;
         });
         // Bound anchors separately from the slightly different LOD shapes.
         const radius=Math.max(...cell.map(p=>Math.hypot(p.x-center.x,p.y-center.y,p.z-center.z)));
@@ -210,7 +219,7 @@ export class GrassField extends THREE.Group {
           plantGrowth=texture2D(plantEdgeMask,(plantWorld.xz-plantEdgeBounds.xy)/plantEdgeBounds.zw).r;
           float rootNoise=fract(sin(dot(plantWorld.xz,vec2(43.719,17.631)))*18473.731);
           vPlantVisible=step(rootNoise,mix(.04,1.0,smoothstep(0.0,.95,plantGrowth)));
-          transformed.y*=.18+.82*plantGrowth;
+          transformed.y*=.72+.28*plantGrowth;
           float ground=plantGround(plantWorld.xz)-.031;
           float verticalScale=1.0;
           #ifdef USE_INSTANCING
@@ -220,14 +229,15 @@ export class GrassField extends THREE.Group {
           `:''}
           vPlantDistance=distance(plantWorld,plantViewPosition);vPlantHeight=plantHeight;
           vPlantReady=smoothstep(0.0,.5,plantTime-plantBirth);
-          vPlantJitter=fract(sin(dot(plantWorld.xz,vec2(12.9898,78.233)))*43758.5453)*7.0;
+          vPlantJitter=fract(sin(dot(plantWorld.xz,vec2(12.9898,78.233)))*43758.5453)*3.5;
           float wave=sin(plantWorld.x*.63+plantWorld.z*.42+plantTime*1.55);
           float flutter=sin(plantWorld.z*1.6-plantTime*2.1+position.y*9.0);
           transformed.x+=(wave*.018+flutter*.006)*plantHeight*plantHeight*(.3+.7*plantGrowth);
           transformed.z+=wave*.012*plantHeight*plantHeight*(.3+.7*plantGrowth);
         `);
       shader.fragmentShader=shader.fragmentShader
-        .replace('#include <common>','#include <common>\nvarying float vPlantHeight;varying float vPlantDistance;varying float vPlantJitter;varying float vPlantReady;varying float vPlantVisible;')
+        .replace('#include <common>',`#include <common>\n${vegetationPaletteGLSL}\nvarying float vPlantHeight;varying float vPlantDistance;varying float vPlantJitter;varying float vPlantReady;varying float vPlantVisible;`)
+        .replace('#include <map_fragment>','#include <map_fragment>\ndiffuseColor.rgb=vegetationAlbedo(diffuseColor.rgb,.94);')
         .replace('#include <alphatest_fragment>',`#include <alphatest_fragment>
           if(vPlantVisible<.5)discard;
           float plantNear=1.0-smoothstep(${model.lodStart.toFixed(1)},${model.lodEnd.toFixed(1)},vPlantDistance);
@@ -255,7 +265,7 @@ export class GrassField extends THREE.Group {
           #if defined(USE_ENVMAP) && defined(ENVMAP_TYPE_CUBE_UV)
           plantBackIrradiance+=getIBLIrradiance(-geometryNormal);
           #endif
-          vec3 plantTransmissionTint=vec3(.94,1.0,.82);
+          vec3 plantTransmissionTint=vec3(.95,1.0,.94);
           reflectedLight.indirectDiffuse=reflectedLight.indirectDiffuse*.62+plantBackIrradiance*BRDF_Lambert(material.diffuseColor)*plantTransmissionTint*.38;
           reflectedLight.indirectDiffuse*=mix(.96,1.0,vPlantHeight);
           #if NUM_DIR_LIGHTS == 1
@@ -270,7 +280,7 @@ export class GrassField extends THREE.Group {
           #endif
         `);
     };
-    material.customProgramCacheKey=()=>`two-sided-edge-groundcover-v4-${model.patch}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
+    material.customProgramCacheKey=()=>`two-sided-edge-groundcover-v6-${model.patch}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
   }
 
   update(time:number,view:THREE.Vector3){
