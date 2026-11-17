@@ -32,13 +32,13 @@
         },
         {
           "file": "oak-far.glb",
-          "bytes": 340944,
-          "triangles": 1453,
-          "leafClusters": 312,
+          "bytes": 245464,
+          "triangles": 517,
+          "leafClusters": 78,
           "leafArea": 606.898
         }
       ],
-      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; nested source anchors and local leaf-area compensation across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; near/mid geometry unchanged, far merges four former local clusters per crossed pair for 75% fewer foliage triangles. Nested source anchors and accumulated local leaf-area compensation across LODs; branch geometry unchanged. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
     },
     {
       "id": "ash",
@@ -71,13 +71,13 @@
         },
         {
           "file": "ash-far.glb",
-          "bytes": 341724,
-          "triangles": 1676,
-          "leafClusters": 364,
+          "bytes": 230328,
+          "triangles": 584,
+          "leafClusters": 91,
           "leafArea": 419.56
         }
       ],
-      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; nested source anchors and local leaf-area compensation across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; near/mid geometry unchanged, far merges four former local clusters per crossed pair for 75% fewer foliage triangles. Nested source anchors and accumulated local leaf-area compensation across LODs; branch geometry unchanged. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
     },
     {
       "id": "pine",
@@ -110,13 +110,13 @@
         },
         {
           "file": "pine-far.glb",
-          "bytes": 338552,
-          "triangles": 1110,
-          "leafClusters": 224,
+          "bytes": 270004,
+          "triangles": 438,
+          "leafClusters": 56,
           "leafArea": 222.893
         }
       ],
-      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; nested source anchors and local leaf-area compensation across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
+      "changes": "Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; near/mid geometry unchanged, far merges four former local clusters per crossed pair for 75% fewer foliage triangles. Nested source anchors and accumulated local leaf-area compensation across LODs; branch geometry unchanged. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped."
     }
   ],
   "barkSource": {

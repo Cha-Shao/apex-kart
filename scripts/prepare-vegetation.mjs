@@ -71,10 +71,15 @@ function leafClusterLods(geometry){
   };
   const representative=items=>{
     // The largest original pair limits enlargement to sqrt(cluster size).
-    const source=items.reduce((largest,item)=>item.area>largest.area||item.area===largest.area&&item.start<largest.start?item:largest),area=items.reduce((sum,item)=>sum+item.area,0);
+    const source=items.reduce((largest,item)=>item.area>largest.area||item.area===largest.area&&item.start<largest.start?item:largest),area=items.reduce((sum,item)=>sum+item.area*(item.enlargement??1)**2,0);
     return {...source,enlargement:Math.sqrt(area/Math.max(source.area,1e-8))};
   };
-  const far=partition(groups,4),mid=far.flatMap(cluster=>partition(cluster,2));
+  // Keep the existing near/mid cards exactly as authored. Merge four of the
+  // former far clusters into one crossed pair (up to 16 source pairs), keeping
+  // its source anchor, orientation and accumulated leaf area. This cuts far
+  // foliage triangles by 75% without flattening the trunk or the whole crown.
+  const local=partition(groups,4),mid=local.flatMap(cluster=>partition(cluster,2));
+  const far=partition(local.map(representative),4);
   return [groups.map(group=>representative([group])),mid.map(representative),far.map(representative)];
 }
 
@@ -134,7 +139,7 @@ export async function prepareVegetation({cache='test-results/asset-source',outpu
       const leafArea=leafLods[level].reduce((sum,group)=>sum+group.area*group.enlargement**2,0)*scale**2;
       await fs.writeFile(path.join(output,file),bytes);files.push(file);lods.push({file,bytes:bytes.byteLength,triangles,leafClusters:leafLods[level].length,leafArea:Number(leafArea.toFixed(3))});
     }
-    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; nested source anchors and local leaf-area compensation across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped.'});console.log(id,lods);
+    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Spatially partitioned paired leaf cards; near/mid geometry unchanged, far merges four former local clusters per crossed pair for 75% fewer foliage triangles. Nested source anchors and accumulated local leaf-area compensation across LODs; branch geometry unchanged. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped.'});console.log(id,lods);
   }
   const manifest={license:'MIT; bark textures CC0-1.0',assets:records,barkSource:{url:'https://polyhaven.com/a/bark_brown_02',license:'CC0-1.0'},budgets:{maxGlbBytes:1024*1024,colorTextureSize:512,barkNormalSize:256}};
   await fs.writeFile(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');return records;
