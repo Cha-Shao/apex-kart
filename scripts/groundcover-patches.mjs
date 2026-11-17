@@ -1,7 +1,7 @@
 import path from 'node:path';
 import sharp from 'sharp';
 
-const PATCH_SIZE=1.8,ATLAS_COLUMNS=4,ATLAS_CELL=256,ATLAS_PADDING=12;
+const ATLAS_CELL=256,ATLAS_PADDING=12;
 const seeded=initial=>{let seed=initial;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};};
 const accessor=(document,buffer,type,array)=>document.createAccessor().setType(type).setArray(array).setBuffer(buffer);
 
@@ -17,24 +17,6 @@ function clumpRoot(random,points,cx,cz,rx,rz,phase){
     if(distance>score){best=point;score=distance;}
   }
   points.push(best);return best;
-}
-
-/** Hundreds of narrow cards form one tall core and 2-3 lower companion
- * clumps. Companions occupy a partial arc, with gaps around the other sides.
- * Alternating sizes preserve both populations in the shared far-LOD prefix. */
-function clusterLayout(seed,count){
-  const random=seeded(seed),points=[],phase=random()*Math.PI*2,lobes=[],core=[],arc=.7+random()*.4;
-  const coreX=.29+random()*.04,coreZ=.25+random()*.05;
-  for(let i=0,n=2+Math.floor(random()*2);i<n;i++){
-    const angle=phase+i*arc,radius=.43+random()*.16;
-    lobes.push({x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,rx:.2+random()*.04,rz:.17+random()*.05,points:[]});
-  }
-  for(let i=0;i<count;i++){
-    const tall=i%2===0,lobe=lobes[Math.floor(i/2)%lobes.length];
-    const root=tall?clumpRoot(random,core,0,0,coreX,coreZ,phase):clumpRoot(random,lobe.points,lobe.x,lobe.z,lobe.rx,lobe.rz,phase);
-    points.push({...root,tall});
-  }
-  return points;
 }
 
 /** One continuous card, split at mid-height. Even the lower face leans away
@@ -119,9 +101,9 @@ export async function groundcoverPatches({document,buffer,scene,metadata,cache,c
   const rgba=await sharp({create:{width:1024,height:512,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite(colors).webp({quality:91,alphaQuality:100}).toBuffer();
   const material=document.createMaterial('meadow-patches-groundcover').setBaseColorTexture(document.createTexture('meadow-clusters-rgba').setImage(rgba).setMimeType('image/webp'))
     .setMetallicFactor(0).setRoughnessFactor(1).setAlphaMode('MASK').setAlphaCutoff(.4).setDoubleSided(true);
-  const variants=[],grassVariants=[];
+  const grassVariants=[];
   for(const [kind,height,atlas] of [['grass-short-a',.13,0],['grass-short-b',.145,1],['grass-tall-a',.2,2],['grass-tall-b',.215,3]]){
-    const tall=kind.startsWith('grass-tall'),count=tall?32:24,random=seeded(3149+atlas*193),roots=[];
+    const tall=kind.startsWith('grass-tall'),count=tall?48:40,random=seeded(3149+atlas*193),roots=[];
     const layout=Array.from({length:count},()=>clumpRoot(random,roots,0,0,tall?.18:.14,tall?.16:.12,atlas));
     for(let level=0;level<2;level++){
       const data=cardData(),cards=level===0?count:count/2;
@@ -134,18 +116,5 @@ export async function groundcoverPatches({document,buffer,scene,metadata,cache,c
       grassVariants.push({name,height,cards,cardWidth:[.045,.065],triangles:data.indices.length/3,shape:'dense small elliptical tuft; each narrow card has two progressively leaning faces'});
     }
   }
-  for(let variant=0;variant<4;variant++)for(let level=0;level<2;level++){
-    const layout=clusterLayout(2191+variant*367,256),count=level===0?256:128,data=cardData();
-    for(let i=0;i<count;i++){
-      const random=seeded(7193+variant*367+i*9187),atlas=Math.floor(random()*ATLAS_COLUMNS),root=layout[i],height=(root.tall?.18+random()*.035:.12+random()*.025)*root.vigor;
-      // Keep the silhouette and width of surviving cards unchanged at LOD
-      // transitions. Only the number of tufts changes with distance.
-      bentCard(data,{x:root.x,z:root.z,width:.045+random()*.025,height,rotation:random()*Math.PI*2,atlas,mirror:random()<.5,tint:.94+random()*.06,lower:.14+random()*.08,upper:.34+random()*.12});
-    }
-    const geometry=grassPrimitive(document,buffer,material,data);
-    const name=`meadow-${'abcd'[variant]}-${level===0?'near':'far'}`;
-    scene.addChild(document.createNode(name).setMesh(document.createMesh(name).addPrimitive(geometry)));
-    variants.push({name,patchSize:PATCH_SIZE,cards:count,cardWidth:[.045,.07],triangles:data.indices.length/3,distribution:'dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs'});
-  }
-  return {source:id,sourceFiles:[colorFile,alphaFile].map(({url,md5})=>({url,md5})),atlas:'Four small rooted photographic tufts from the original 4K atlas, packed into shared 1024x512 RGBA. Card width 4.5-7cm, independent of height. Each card has two connected tilted faces and upward lighting normals; no grass normal or AO map.',grassVariants,variants};
+  return {source:id,sourceFiles:[colorFile,alphaFile].map(({url,md5})=>({url,md5})),atlas:'Four small rooted photographic tufts from the original 4K atlas, packed into shared 1024x512 RGBA. Straight opaque stem padding is trimmed off. Card width 4.5-6.5cm, independent of height. Each card has two connected tilted faces and upward lighting normals; no grass normal or AO map.',grassVariants,colonies:'Runtime groups of 2-3 touching high tufts and 3-5 partial low-grass companions. Each actual tuft fits the land independently; interiors are not randomly thinned. Near/far LODs share surviving card anchors, dimensions and bends.'};
 }

@@ -19,5 +19,7 @@ export function vegetationEdgeDistance(paved:FootprintIndex,x:number,z:number){
  * Two noise scales disturb the contour without periodic bands or track IDs. */
 export function vegetationEdgeWeight(distance:number,x:number,z:number){
   const edgeNoise=(vegetationNoise(x*.47+12.7,z*.47-9.3)-.5)*.8+(vegetationGrowth(x,z)-.5)*1.1;
-  const t=Math.max(0,Math.min(1,(distance+edgeNoise-.12)/3.8));return t*t*(3-2*t);
+  // Grass lives in the roughly three-metre strip inside the fence. Complete
+  // this transition within that strip rather than thinning its entire width.
+  const t=Math.max(0,Math.min(1,(distance+edgeNoise*.35-.08)/1.25));return t*t*(3-2*t);
 }

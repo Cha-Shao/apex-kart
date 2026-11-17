@@ -95,7 +95,7 @@ export async function prepareGroundcover({cache='test-results/asset-source/groun
   }
   await document.transform(weld(),dedup(),prune());
   const bytes=await io.writeBinary(document);await fs.writeFile(path.join(output,'groundcover.glb'),bytes);
-  await fs.writeFile(path.join(output,'groundcover-manifest.json'),JSON.stringify({license:'CC0-1.0',file:'groundcover.glb',bytes:bytes.length,changes:'Dense elliptical grass tufts and families assembled from individual 4.5-7cm narrow two-face cards. Small rooted photographic tufts replace wide whole-meadow cutouts. Moderate authored height differences, soft irregular edges and partial low-grass companions. Shared anchors and bends across mesh LODs; artist-authored weeds and shrubs retained.',sources:records,meadow},null,2)+'\n');
+  await fs.writeFile(path.join(output,'groundcover-manifest.json'),JSON.stringify({license:'CC0-1.0',file:'groundcover.glb',bytes:bytes.length,changes:'Connected grass colonies assembled at runtime from dense high/low tufts of 4.5-6.5cm two-face cards. Each tuft fits narrow verges independently, with no random thinning inside a tuft. Moderate authored height differences and partial low-grass skirts. Root UV padding is trimmed; shared anchors and bends across mesh LODs; artist-authored weeds and shrubs retained.',sources:records,meadow},null,2)+'\n');
   await fs.writeFile(path.join(output,'Poly-Haven-LICENSE.txt'),'Groundcover models and textures from Poly Haven.\nLicense: CC0 1.0 Universal (public domain dedication).\nhttps://polyhaven.com/license\nhttps://creativecommons.org/publicdomain/zero/1.0/\nIndividual asset links and source checksums: groundcover-manifest.json\n');
   console.log(`groundcover.glb: ${(bytes.length/1024/1024).toFixed(2)} MiB`);
 }

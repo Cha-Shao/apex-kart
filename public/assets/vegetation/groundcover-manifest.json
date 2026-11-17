@@ -1,8 +1,8 @@
 {
   "license": "CC0-1.0",
   "file": "groundcover.glb",
-  "bytes": 1231852,
-  "changes": "Dense elliptical grass tufts and families assembled from individual 4.5-7cm narrow two-face cards. Small rooted photographic tufts replace wide whole-meadow cutouts. Moderate authored height differences, soft irregular edges and partial low-grass companions. Shared anchors and bends across mesh LODs; artist-authored weeds and shrubs retained.",
+  "bytes": 839484,
+  "changes": "Connected grass colonies assembled at runtime from dense high/low tufts of 4.5-6.5cm two-face cards. Each tuft fits narrow verges independently, with no random thinning inside a tuft. Moderate authored height differences and partial low-grass skirts. Root UV padding is trimmed; shared anchors and bends across mesh LODs; artist-authored weeds and shrubs retained.",
   "sources": [
     {
       "id": "grass_medium_01",
@@ -22,28 +22,61 @@
         {
           "name": "grass-short-a-near",
           "height": 0.13,
-          "cards": 24,
+          "cards": 40,
           "cardWidth": [
             0.045,
             0.065
           ],
-          "triangles": 96,
+          "triangles": 160,
           "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
         },
         {
           "name": "grass-short-a-far",
           "height": 0.13,
-          "cards": 12,
+          "cards": 20,
           "cardWidth": [
             0.045,
             0.065
           ],
-          "triangles": 48,
+          "triangles": 80,
           "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
         },
         {
           "name": "grass-short-b-near",
           "height": 0.145,
+          "cards": 40,
+          "cardWidth": [
+            0.045,
+            0.065
+          ],
+          "triangles": 160,
+          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+        },
+        {
+          "name": "grass-short-b-far",
+          "height": 0.145,
+          "cards": 20,
+          "cardWidth": [
+            0.045,
+            0.065
+          ],
+          "triangles": 80,
+          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+        },
+        {
+          "name": "grass-tall-a-near",
+          "height": 0.2,
+          "cards": 48,
+          "cardWidth": [
+            0.045,
+            0.065
+          ],
+          "triangles": 192,
+          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+        },
+        {
+          "name": "grass-tall-a-far",
+          "height": 0.2,
           "cards": 24,
           "cardWidth": [
             0.045,
@@ -53,58 +86,25 @@
           "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
         },
         {
-          "name": "grass-short-b-far",
-          "height": 0.145,
-          "cards": 12,
-          "cardWidth": [
-            0.045,
-            0.065
-          ],
-          "triangles": 48,
-          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-        },
-        {
-          "name": "grass-tall-a-near",
-          "height": 0.2,
-          "cards": 32,
-          "cardWidth": [
-            0.045,
-            0.065
-          ],
-          "triangles": 128,
-          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-        },
-        {
-          "name": "grass-tall-a-far",
-          "height": 0.2,
-          "cards": 16,
-          "cardWidth": [
-            0.045,
-            0.065
-          ],
-          "triangles": 64,
-          "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-        },
-        {
           "name": "grass-tall-b-near",
           "height": 0.215,
-          "cards": 32,
+          "cards": 48,
           "cardWidth": [
             0.045,
             0.065
           ],
-          "triangles": 128,
+          "triangles": 192,
           "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
         },
         {
           "name": "grass-tall-b-far",
           "height": 0.215,
-          "cards": 16,
+          "cards": 24,
           "cardWidth": [
             0.045,
             0.065
           ],
-          "triangles": 64,
+          "triangles": 96,
           "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
         }
       ]
@@ -236,33 +236,66 @@
         "md5": "a83fcb099bafefd89c552d4f0e84dbdc"
       }
     ],
-    "atlas": "Four small rooted photographic tufts from the original 4K atlas, packed into shared 1024x512 RGBA. Card width 4.5-7cm, independent of height. Each card has two connected tilted faces and upward lighting normals; no grass normal or AO map.",
+    "atlas": "Four small rooted photographic tufts from the original 4K atlas, packed into shared 1024x512 RGBA. Straight opaque stem padding is trimmed off. Card width 4.5-6.5cm, independent of height. Each card has two connected tilted faces and upward lighting normals; no grass normal or AO map.",
     "grassVariants": [
       {
         "name": "grass-short-a-near",
         "height": 0.13,
-        "cards": 24,
+        "cards": 40,
         "cardWidth": [
           0.045,
           0.065
         ],
-        "triangles": 96,
+        "triangles": 160,
         "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
       },
       {
         "name": "grass-short-a-far",
         "height": 0.13,
-        "cards": 12,
+        "cards": 20,
         "cardWidth": [
           0.045,
           0.065
         ],
-        "triangles": 48,
+        "triangles": 80,
         "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
       },
       {
         "name": "grass-short-b-near",
         "height": 0.145,
+        "cards": 40,
+        "cardWidth": [
+          0.045,
+          0.065
+        ],
+        "triangles": 160,
+        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+      },
+      {
+        "name": "grass-short-b-far",
+        "height": 0.145,
+        "cards": 20,
+        "cardWidth": [
+          0.045,
+          0.065
+        ],
+        "triangles": 80,
+        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+      },
+      {
+        "name": "grass-tall-a-near",
+        "height": 0.2,
+        "cards": 48,
+        "cardWidth": [
+          0.045,
+          0.065
+        ],
+        "triangles": 192,
+        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
+      },
+      {
+        "name": "grass-tall-a-far",
+        "height": 0.2,
         "cards": 24,
         "cardWidth": [
           0.045,
@@ -272,150 +305,28 @@
         "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
       },
       {
-        "name": "grass-short-b-far",
-        "height": 0.145,
-        "cards": 12,
-        "cardWidth": [
-          0.045,
-          0.065
-        ],
-        "triangles": 48,
-        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-      },
-      {
-        "name": "grass-tall-a-near",
-        "height": 0.2,
-        "cards": 32,
-        "cardWidth": [
-          0.045,
-          0.065
-        ],
-        "triangles": 128,
-        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-      },
-      {
-        "name": "grass-tall-a-far",
-        "height": 0.2,
-        "cards": 16,
-        "cardWidth": [
-          0.045,
-          0.065
-        ],
-        "triangles": 64,
-        "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
-      },
-      {
         "name": "grass-tall-b-near",
         "height": 0.215,
-        "cards": 32,
+        "cards": 48,
         "cardWidth": [
           0.045,
           0.065
         ],
-        "triangles": 128,
+        "triangles": 192,
         "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
       },
       {
         "name": "grass-tall-b-far",
         "height": 0.215,
-        "cards": 16,
+        "cards": 24,
         "cardWidth": [
           0.045,
           0.065
         ],
-        "triangles": 64,
+        "triangles": 96,
         "shape": "dense small elliptical tuft; each narrow card has two progressively leaning faces"
       }
     ],
-    "variants": [
-      {
-        "name": "meadow-a-near",
-        "patchSize": 1.8,
-        "cards": 256,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 1024,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-a-far",
-        "patchSize": 1.8,
-        "cards": 128,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 512,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-b-near",
-        "patchSize": 1.8,
-        "cards": 256,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 1024,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-b-far",
-        "patchSize": 1.8,
-        "cards": 128,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 512,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-c-near",
-        "patchSize": 1.8,
-        "cards": 256,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 1024,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-c-far",
-        "patchSize": 1.8,
-        "cards": 128,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 512,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-d-near",
-        "patchSize": 1.8,
-        "cards": 256,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 1024,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      },
-      {
-        "name": "meadow-d-far",
-        "patchSize": 1.8,
-        "cards": 128,
-        "cardWidth": [
-          0.045,
-          0.07
-        ],
-        "triangles": 512,
-        "distribution": "dense elliptical tall core and 2-3 partial short-grass companion clumps; soft irregular edges; shared card anchors and bends across LODs"
-      }
-    ]
+    "colonies": "Runtime groups of 2-3 touching high tufts and 3-5 partial low-grass companions. Each actual tuft fits the land independently; interiors are not randomly thinned. Near/far LODs share surviving card anchors, dimensions and bends."
   }
 }

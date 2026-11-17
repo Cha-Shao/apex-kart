@@ -16,17 +16,24 @@ export function vegetationNoise(x:number,z:number){
 /** Coherent growth variation has no periodic sine-wave bands. */
 export const vegetationGrowth=(x:number,z:number)=>.64*vegetationNoise(x*.035+19.3,z*.035-7.1)+.26*vegetationNoise(x*.093-3.9,z*.093+31.7)+.1*vegetationNoise(x*.217+11.2,z*.217+5.6);
 
+/** Colonies share a several-metre growth field: adjoining tufts join into
+ * irregular beds while whole gaps remain between beds. */
+export function vegetationColonyWeight(x:number,z:number){
+  const growth=vegetationNoise(x*.19+37.1,z*.19-12.7)*.72+vegetationNoise(x*.53-8.3,z*.53+21.6)*.28;
+  const t=Math.max(0,Math.min(1,(growth-.25)/.48));return t*t*(3-2*t);
+}
+
 /** Priority-thinned hard-core samples, inspired by Poisson-disk blue noise.
  * The hash grid only accelerates neighbour queries; candidates can be anywhere
  * in each cell. The neighbour halo is global, so tile borders do not form rows. */
 export function meadowSeeds(minX:number,minZ:number,maxX:number,maxZ:number){
-  const cell=1.5,candidates=new Map<string,VegetationSeed>(),points:VegetationSeed[]=[];
+  const cell=1.05,candidates=new Map<string,VegetationSeed>(),points:VegetationSeed[]=[];
   const candidate=(ix:number,iz:number)=>{
     const key=`${ix},${iz}`;let point=candidates.get(key);if(point)return point;
     const x=(ix+vegetationHash(ix,iz,431))*cell,z=(iz+vegetationHash(ix,iz,997))*cell;
-    // Separate whole grass families rather than tiling a continuous carpet.
-    // Their short companion lobes can meet while tall cores remain distinct.
-    point={x,z,priority:vegetationHash(ix,iz,1913),radius:1.25+vegetationGrowth(x,z)*.25};candidates.set(key,point);return point;
+    // Individual small tufts are fitted independently around each seed;
+    // neighbouring colonies can connect through their low-grass skirts.
+    point={x,z,priority:vegetationHash(ix,iz,1913),radius:.82+vegetationGrowth(x,z)*.16};candidates.set(key,point);return point;
   };
   for(let iz=Math.floor(minZ/cell);iz<Math.ceil(maxZ/cell);iz++)for(let ix=Math.floor(minX/cell);ix<Math.ceil(maxX/cell);ix++){
     const point=candidate(ix,iz);if(point.x<minX||point.x>=maxX||point.z<minZ||point.z>=maxZ)continue;

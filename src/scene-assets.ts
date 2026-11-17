@@ -108,7 +108,7 @@ export class SceneAssets {
     for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
     const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
     const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-coverage-3':groundcover?'?v=grounded-fine-grass-6':''}`);
+      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-coverage-3':groundcover?'?v=connected-grass-colonies-7':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
