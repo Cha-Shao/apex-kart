@@ -11,7 +11,7 @@ import {SectorTiming} from './timing';
 import {mountLapTimes} from './components/LapTimes';
 import {mountVehiclePicker} from './components/VehiclePicker';
 import {type VehicleId} from './vehicles';
-import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Sparkles, Sun, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
+import { createIcons, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownToLine, ArrowUpFromLine, Gamepad2, Check, ChevronDown, CircleHelp, Focus, Fullscreen, Gauge, Grip, Maximize2, MousePointer2, Pause, Pencil, Play, Redo2, RotateCcw, Save, Settings2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from 'lucide';
 import { bridgeHeight, buildTrack, DEFAULT_SETTINGS, nearestOnTrack, parseTrackFile, type RouteMetadata, type TrackData, type TrackFile, type TrackSettings } from './track';
 import { TrackEditor } from './editor';
 import { KartPhysics } from './physics';
@@ -23,7 +23,7 @@ import { PedalHistory } from './telemetry';
 import { CIRCUIT_LIBRARY, F1_CALENDAR_NOTE } from './circuit-library';
 import {circuitTerrain,CIRCUIT_TERRAIN_VERSION} from './preset-terrain';
 
-const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Sparkles,Sun,Trash2,Undo2,Volume2,VolumeX,X};
+const iconSet={ArrowUp,ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,ArrowDownToLine,ArrowUpFromLine,Gamepad2,Check,ChevronDown,CircleHelp,Focus,Fullscreen,Gauge,Grip,Maximize2,MousePointer2,Pause,Pencil,Play,Redo2,RotateCcw,Save,Settings2,Sparkles,Trash2,Undo2,Volume2,VolumeX,X};
 const icons=()=>createIcons({icons:iconSet,attrs:{'stroke-width':1.6}});
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const formatTime=(seconds:number)=>{if(!Number.isFinite(seconds))return '—:——.———';const m=Math.floor(seconds/60),s=Math.floor(seconds%60),cs=Math.floor(seconds%1*1000);return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(3,'0')}`;};
@@ -40,7 +40,6 @@ $('#app').innerHTML=`
   <section class="viewport" aria-label="赛道 3D 视图">
     <div id="scene-container"></div>
     <div class="view-vignette"></div>
-    <div class="viewport-top"><div class="weather"><i data-lucide="sun"></i><span>晴 · 24°C</span><span class="weather-line"></span><span>干燥路面</span></div></div>
     <div class="session-top" id="session-top" hidden><div class="session-chip"><span class="live-dot"></span>自由练习<span class="session-divider">/</span><span id="race-track-name">${defaultCircuit.name}</span></div></div>
     <div class="lap-history" id="lap-history" hidden></div><div class="sector-bars" id="sector-bars" hidden><div class="timing-driver"><b>DRIVER</b><div><span>07</span><strong>YOU</strong></div></div><div class="sector-bar pending" data-sector="0"><b>SECTOR 1</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="sector-bar pending" data-sector="1"><b>SECTOR 2</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="sector-bar pending" data-sector="2"><b>SECTOR 3</b><div class="sector-value"><i></i><small>00.000</small></div></div><div class="timing-total"><b>LAP TIME</b><strong id="broadcast-lap">0:00.000</strong></div></div><div class="center-message" id="center-message" hidden></div>
     <div class="start-signal" id="start-signal" role="status" aria-live="polite" aria-atomic="true" hidden><div class="start-signal__rail" aria-hidden="true">${Array.from({length:START_LIGHT_COUNT},()=>'<span class="start-signal__lamp"></span>').join('')}</div><div class="start-signal__reaction" aria-hidden="true"><small>起步反应时间</small><strong><span id="start-reaction-time">0.000</span><span class="start-signal__unit">s</span></strong></div><span id="start-signal-label" class="start-signal__label">等待红灯 · 熄灭起步</span></div>

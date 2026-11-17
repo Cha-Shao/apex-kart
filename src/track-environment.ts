@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import {curbWidth,isOnAsphalt,isOnGravel,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
+import {TRACK_SURFACE_HEIGHT,bridgeHeight,curbWidth,isOnAsphalt,isOnGravel,nearestOnTrack,roadFootprint,type TrackData,type TrackSample,type Point} from './track';
 import type {TerrainField} from './terrain';
 import type {SceneAssets} from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
-import {surfaceUVs} from './scene-assets';
+import {surfaceUVs,terrainGrassColor} from './scene-assets';
 import {drapeTriangles} from './terrain-mesh';
 import {addGuardrails} from './guardrails';
-import {FootprintIndex,polygonContains} from './track-footprint';
+import {FootprintIndex,cross2,polygonContains} from './track-footprint';
+import {ASPHALT_TEXTURE_METRES,GRAVEL_TEXTURE_METRES} from './surface-materials';
 
 export interface VegetationPoint extends Point {scale:number;stretch:number;variant:number}
 export interface DetailLayer {object:THREE.Object3D;center:THREE.Vector3;distance:number}
@@ -59,64 +60,90 @@ function instances(group:THREE.Group,geometry:THREE.BufferGeometry,material:THRE
 function detail(layers:DetailLayer[],mesh:THREE.InstancedMesh|null,distance:number){if(mesh?.boundingSphere)layers.push({object:mesh,center:mesh.boundingSphere.center.clone(),distance});}
 function point(s:TrackSample,offset:number){return{x:s.x+s.nx*offset,z:s.z+s.nz*offset};}
 
-function soilEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,land:LandPlacement){
-  const dense=surfaceTrack(track),positions:number[]=[],colors:number[]=[],indices:number[]=[],n=dense.samples.length;
+function roadsideEdges(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,land:LandPlacement){
+  const dense=surfaceTrack(track),positions:number[]=[],colors:number[]=[],verges:number[]=[],grassMasks:number[]=[],roadUvs:number[]=[],indices:number[]=[],n=dense.samples.length,width=.56,inner=-.12,tint=new THREE.Color();
   const paved=new FootprintIndex([...roadFootprint(dense.samples,dense.features,dense.width),...dense.runoffRegions]);
   const retained=(p:Point)=>[...paved.query(p.x,p.x,p.z,p.z)].some(r=>polygonContains(r.points,p));
+  const exposedAsphalt=(index:number,side:number)=>{
+    const f=dense.features,kerb=curbWidth(dense.width)*(side>0?f.left:f.right)[index],outer=(side>0?f.gravelLeft:f.gravelRight)[index],apron=(side>0?f.runoffLeft:f.runoffRight)[index];
+    if(outer-apron>.02)return 0;
+    if(apron>.02)return -1;
+    return Math.max(0,1-kerb/.04);
+  };
+  const grassOverhang=(index:number,side:number)=>{
+    const f=dense.features,outer=(side>0?f.gravelLeft:f.gravelRight)[index],apron=(side>0?f.runoffLeft:f.runoffRight)[index];
+    // Gravel spills over grass instead. Crossing or neighbouring pavement
+    // also prevents a turf strip being drawn across the other road section.
+    if(outer-apron>.02||retained(point(dense.samples[index],(edge(dense,index,side)+.12)*side)))return 0;
+    return 1;
+  };
   for(const side of [-1,1])for(let i=0;i<n;i++){
-    const j=(i+1)%n,a=dense.samples[i],b=dense.samples[j],ea=edge(dense,i,side),eb=edge(dense,j,side),width=.32+.24*(.5+.5*Math.sin(a.distance*.19));
+    const j=(i+1)%n,a=dense.samples[i],b=dense.samples[j],ea=edge(dense,i,side),eb=edge(dense,j,side),kindA=exposedAsphalt(i,side),kindB=exposedAsphalt(j,side);
+    // Elevated decks do not have a grass verge on the ground beneath them.
+    if(bridgeHeight(dense,i)>.02||bridgeHeight(dense,j)>.02)continue;
     // A clipped-off runoff must not leave its old soil outline on the grass.
     if(!retained(point(a,(ea-.04)*side))||!retained(point(b,(eb-.04)*side)))continue;
-    const p=point(a,(ea+.02)*side),q=point(a,(ea+width)*side),r=point(b,(eb+.02)*side),s=point(b,(eb+width)*side);
+    // Overlap slightly underneath the physical paved depth pass, avoiding a
+    // bare seam while letting the fringe break up only the outside edge.
+    const grassA=grassOverhang(i,side),grassB=grassOverhang(j,side);
+    const p=point(a,(ea+inner)*side),q=point(a,(ea+width)*side),r=point(b,(eb+inner)*side),s=point(b,(eb+width)*side);
     if(![p,q,r,s].every(p=>land(p,.4)))continue;
+    const areaA=cross2(p,q,r),areaB=cross2(q,s,r);if(Math.abs(areaA)<1e-9||Math.abs(areaB)<1e-9)continue;
     const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+.007,terrain),base=positions.length/3;
     for(let k=0;k<data.vertices.length;k+=3){
-      const x=data.vertices[k],z=data.vertices[k+2],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz||1))),e=ea+(eb-ea)*t;
-      const distance=((x-a.x-dx*t)*a.nx+(z-a.z-dz*t)*a.nz)*side,fade=Math.max(0,Math.min(1,1-(distance-e)/width));
-      positions.push(x,data.vertices[k+1],z);colors.push(.72,.64,.48,fade*.38*(.7+.3*Math.sin(a.distance*.13)**2));
+      const x=data.vertices[k],z=data.vertices[k+2],v={x,z},uA=cross2(p,v,r)/areaA,vA=cross2(p,q,v)/areaA;
+      let t:number,outside:number;
+      // Carry exact triangle coordinates through terrain clipping: projecting
+      // onto the centreline would make the narrow fringe wobble on tight bends.
+      if(uA>=-1e-6&&vA>=-1e-6&&uA+vA<=1+1e-6){t=vA;outside=inner+(width-inner)*uA;}
+      else{const uB=cross2(q,v,r)/areaB,vB=cross2(q,s,v)/areaB;t=uB+vB;outside=width-(width-inner)*vB;}
+      t=Math.max(0,Math.min(1,t));const lateral=(ea+(eb-ea)*t+outside)*side;
+      terrainGrassColor(x,z,terrain.sample(x,z),tint);
+      positions.push(x,data.vertices[k+1],z);colors.push(tint.r,tint.g,tint.b);verges.push(outside,kindA+(kindB-kindA)*t);grassMasks.push(grassA+(grassB-grassA)*t);
+      roadUvs.push(a.distance+(j===0?dense.length-a.distance:b.distance-a.distance)*t,lateral);
     }
     for(const k of data.indices)indices.push(base+k);
   }
-  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,4));geometry.setIndex(indices);surfaceUVs(geometry,.7);terrainNormals(geometry,terrain);
-  // This sits below every paved surface. Never pull it forward with a depth
-  // offset: even at equal depth, the road/kerb/runoff depth pass must win.
-  const material=new THREE.MeshStandardMaterial({map:assets.concrete.map,normalMap:assets.concrete.normalMap,normalScale:new THREE.Vector2(.2,.2),color:0xb8a784,vertexColors:true,roughness:1,envMapIntensity:.1,transparent:true,depthTest:true,depthWrite:false,depthFunc:THREE.LessDepth});
-  const mesh=new THREE.Mesh(geometry,material);mesh.name='feathered-soil-boundary';mesh.receiveShadow=true;mesh.renderOrder=1;group.add(mesh);
+  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setAttribute('verge',new THREE.Float32BufferAttribute(verges,2));geometry.setAttribute('vergeGrass',new THREE.Float32BufferAttribute(grassMasks,1));geometry.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));geometry.setIndex(indices);surfaceUVs(geometry,ASPHALT_TEXTURE_METRES);terrainNormals(geometry,terrain);
+  const grassGeometry=geometry.clone();surfaceUVs(grassGeometry,2);
+  // Only the cutout grass lip sits above the road plane, allowing visible
+  // overlap on the outer kerb. Soil and asphalt fringes remain beneath it.
+  const fringeGeometry=grassGeometry.clone(),fringePositions=fringeGeometry.getAttribute('position');
+  for(let i=0;i<fringePositions.count;i++)fringePositions.setY(i,fringePositions.getY(i)+TRACK_SURFACE_HEIGHT+.006-.007);
+  // Every decoration retains depth tests and precedes shadows/marks/smoke.
+  for(const [geo,material,name,order] of [[grassGeometry,assets.grassVerge,'feathered-grass-and-soil-boundary',0],[geometry,assets.asphaltVerge,'broken-asphalt-grass-edge',1],[geometry,assets.runoffVerge,'broken-runoff-grass-edge',1],[fringeGeometry,assets.grassFringe,'grass-overhanging-kerbs',1]] as const){
+    const mesh=new THREE.Mesh(geo,material);mesh.name=name;mesh.receiveShadow=true;mesh.renderOrder=order;group.add(mesh);
+  }
 }
 
-function grassBlades(){
-  const positions:number[]=[],colors:number[]=[],indices:number[]=[],random=seeded(17);
-  for(let blade=0;blade<7;blade++){
-    const angle=random()*Math.PI*2,offset=random()*.1,height=.09+random()*.13,width=.009+random()*.01,bend=.015+random()*.04,base=positions.length/3,c=Math.cos(angle),s=Math.sin(angle),x=c*offset,z=s*offset;
-    for(const [h,w,lean] of [[0,width,0],[height*.6,width*.6,bend*.4],[height,0,bend]])for(const side of [-1,1]){positions.push(x+c*w*side-s*lean,h,z+s*w*side+c*lean);const light=.42+h/height*.58;colors.push(light*.88,light,light*.71);}
-    indices.push(base,base+1,base+2,base+1,base+3,base+2,base+2,base+3,base+4,base+3,base+5,base+4);
-  }
-  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setIndex(indices);geometry.computeVertexNormals();return geometry;
-}
-
-function understorey(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],layers:DetailLayer[],land:LandPlacement){
-  const random=seeded(813),grassCells=new Map<string,Placement[]>(),count=Math.min(380,Math.ceil(track.length/12)),n=track.samples.length;
-  for(let i=0;i<count;i++){
-    const index=Math.floor(i/count*n),s=track.samples[index];
-    for(const side of [-1,1])for(let k=0;k<6;k++){
-      const offset=(edge(track,index,side)+.3+random()*2.1)*side,x=s.x+s.nx*offset+s.tx*(random()-.5)*10,z=s.z+s.nz*offset+s.tz*(random()-.5)*10;
-      if(!land({x,z},.4)||!grassOnly(track,{x,z},.1))continue;
-      const key=`${Math.floor(x/70)},${Math.floor(z/70)}`,cell=grassCells.get(key)??[],scale=.65+random()*.65;
-      cell.push({x,y:terrain.sample(x,z)-.015,z,sx:scale,sy:scale,sz:scale,ry:random()*Math.PI*2,color:[0x7e9348,0x6d8544,0x8a9a51][Math.floor(random()*3)]});grassCells.set(key,cell);
+/** Loose grains cross both sides of the actual gravel union, including its
+ * asphalt-facing edge. Internal triangulation edges must not emit spill. */
+function gravelSpill(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,land:LandPlacement){
+  const dense=surfaceTrack(track),regions=dense.runoffRegions.filter(r=>r.surface==='gravel'),index=new FootprintIndex(regions),positions:number[]=[],verges:number[]=[],indices:number[]=[];
+  const contains=(p:Point)=>[...index.query(p.x,p.x,p.z,p.z)].some(r=>polygonContains(r.points,p));
+  for(const region of regions){
+    if(bridgeHeight(dense,region.index)>.02||bridgeHeight(dense,(region.index+1)%dense.samples.length)>.02)continue;
+    const points=region.points,orientation=Math.sign(points.reduce((sum,a,i)=>{const b=points[(i+1)%points.length];return sum+a.x*b.z-b.x*a.z;},0));
+    if(!orientation)continue;
+    for(let i=0;i<points.length;i++){
+      const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<.025)continue;
+      const nx=dz/length*orientation,nz=-dx/length*orientation,cuts=Math.max(1,Math.ceil(length/1.2));
+      for(let k=0;k<cuts;k++){
+        const from={x:a.x+dx*k/cuts,z:a.z+dz*k/cuts},to={x:a.x+dx*(k+1)/cuts,z:a.z+dz*(k+1)/cuts},mid={x:(from.x+to.x)*.5+nx*.02,z:(from.z+to.z)*.5+nz*.02};
+        if(contains(mid))continue;
+        const p={x:from.x-nx*.06,z:from.z-nz*.06},q={x:from.x+nx*.34,z:from.z+nz*.34},r={x:to.x-nx*.06,z:to.z-nz*.06},s={x:to.x+nx*.34,z:to.z+nz*.34};
+        if(![p,q,r,s].every(v=>land(v,.1)))continue;
+        // A few millimetres over the road plane, retaining normal depth tests
+        // for vehicles and overpasses. This is a visual deposit, not a collider.
+        const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+TRACK_SURFACE_HEIGHT+.004,terrain),base=positions.length/3;
+        for(let v=0;v<data.vertices.length;v+=3){const x=data.vertices[v],z=data.vertices[v+2];positions.push(x,data.vertices[v+1],z);verges.push((x-from.x)*nx+(z-from.z)*nz,0);}
+        for(const v of data.indices)indices.push(base+v);
+      }
     }
   }
-  const bladeMaterial=new THREE.MeshLambertMaterial({color:0xffffff,vertexColors:true,side:THREE.DoubleSide});
-  for(const cell of grassCells.values())detail(layers,instances(group,grassBlades(),bladeMaterial,cell,'close-grass-tufts'),95);
-  const model=assets.models.get('ash-far');if(!model)return;model.updateMatrixWorld(true);
-  model.traverse(source=>{
-    if(!(source instanceof THREE.Mesh)||Array.isArray(source.material)||!source.material.name.includes('leaves'))return;
-    source.geometry.computeBoundingBox();const minY=source.geometry.boundingBox?.min.y??0;
-    const cells=new Map<string,Placement[]>();
-    for(const shrub of shrubs){const key=`${Math.floor(shrub.x/140)},${Math.floor(shrub.z/140)}`,cell=cells.get(key)??[],sy=shrub.scale*shrub.stretch;
-      cell.push({x:shrub.x,y:terrain.sample(shrub.x,shrub.z)-minY*sy-.06,z:shrub.z,sx:shrub.scale*1.4,sy,sz:shrub.scale*1.4,ry:shrub.x*1.7});cells.set(key,cell);
-    }
-    for(const cell of cells.values())detail(layers,instances(group,source.geometry,source.material,cell,'ash understorey shrubs'),330);
-  });
+  if(!indices.length)return;
+  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('verge',new THREE.Float32BufferAttribute(verges,2));geometry.setIndex(indices);surfaceUVs(geometry,GRAVEL_TEXTURE_METRES);terrainNormals(geometry,terrain);
+  const mesh=new THREE.Mesh(geometry,assets.gravelSpill);mesh.name='loose-gravel-over-road-and-grass';mesh.receiveShadow=true;mesh.renderOrder=1;group.add(mesh);
 }
 
 function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,layers:DetailLayer[],land:LandPlacement){
@@ -135,5 +162,5 @@ function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,asset
 }
 
 export function addTrackEnvironment(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,shrubs:VegetationPoint[],land:LandPlacement=()=>true){
-  const layers:DetailLayer[]=[];soilEdges(group,track,terrain,assets,land);understorey(group,track,terrain,assets,shrubs,layers,land);facilities(group,track,terrain,assets,layers,land);return layers;
+  const layers:DetailLayer[]=[];roadsideEdges(group,track,terrain,assets,land);gravelSpill(group,track,terrain,assets,land);facilities(group,track,terrain,assets,layers,land);return layers;
 }

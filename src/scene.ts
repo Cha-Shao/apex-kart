@@ -8,10 +8,10 @@ import { bridgeHeight, curbGeometry, runoffGeometry, curbWidth, TRACK_SURFACE_HE
 import { TerrainField } from './terrain';
 import { TyreSmoke } from './tyre-smoke';
 import { TyreMarks } from './tyre-marks';
-import { SceneAssets, surfaceUVs, disposeSceneGroup } from './scene-assets';
+import { SceneAssets, surfaceUVs, terrainGrassColor, disposeSceneGroup } from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
 import {drapeTriangles} from './terrain-mesh';
-import {tyreGeometry,GRAVEL_TEXTURE_METRES} from './surface-materials';
+import {tyreGeometry,GRAVEL_TEXTURE_METRES,ASPHALT_TEXTURE_METRES} from './surface-materials';
 import {ContactShadow,addGroundContactShadows} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
 import {START_LIGHT_COUNT} from './start-signal';
@@ -20,6 +20,7 @@ import {TerrainWater} from './terrain-water';
 import {coastalTerrain} from './coastal-terrain';
 import {TreeLOD} from './tree-lod';
 import {TREE_MODELS} from './foliage';
+import {GrassField} from './grass';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -58,6 +59,7 @@ export class GameScene {
   private shadowExtent=0;
   private treeLODs:TreeLOD[]=[];
   private detailLayers:DetailLayer[]=[];
+  private grass:GrassField|null=null;
   private contactShadow=new ContactShadow();
   private surfaceDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true});
   private startLightMaterials:THREE.MeshStandardMaterial[]=[];
@@ -102,7 +104,7 @@ export class GameScene {
     this.applyVehicleMaterials();this.replaceKartModel();
     this.tyreMarks.clear();this.setCamera(this.mode);this.renderer.shadowMap.needsUpdate=true;
   }
-  private clearGroup(group:THREE.Group){disposeSceneGroup(group);}
+  private clearGroup(group:THREE.Group){if(group===this.scenery){this.grass?.dispose();this.grass=null;}disposeSceneGroup(group);}
   private applyVehicleMaterials(){
     const replacements:Record<string,THREE.MeshStandardMaterial>={'vehicle-carbon':this.assets.carbon,'vehicle-rubber':this.assets.rubber,'vehicle-tyre':this.assets.tyre,'vehicle-alloy':this.assets.alloy,'vehicle-fabric':this.assets.fabric,'kart-paint':this.assets.paint,'kart-rubber':this.assets.tyre,'kart-alloy':this.assets.alloy,'kart-trim':this.assets.carbon};
     const old=new Set<THREE.Material>();
@@ -173,7 +175,7 @@ export class GameScene {
       if(road)for(let k=0;k<data.vertices.length;k+=3){const x=data.vertices[k],z=data.vertices[k+2],t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(length2||1))),nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t,lateral=(x-a.x-dx*t)*nx+(z-a.z-dz*t)*nz;roadUvs.push(a.distance+(j===0?track.length-a.distance:b.distance-a.distance)*t,lateral);}
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();if(!track.bridges.length)terrainNormals(geo,this.terrain);
-    const surfaceMaterial=road?this.assets.asphalt:this.assets.roadPaint;surfaceUVs(geo,2.1);if(road)geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));
+    const surfaceMaterial=road?this.assets.asphalt:this.assets.roadPaint;surfaceUVs(geo,ASPHALT_TEXTURE_METRES);if(road)geo.setAttribute('roadUv',new THREE.Float32BufferAttribute(roadUvs,2));
     return this.addSurface(new THREE.Mesh(geo,surfaceMaterial),road?SURFACE_ORDER.asphalt:SURFACE_ORDER.white,road?'track-asphalt':'track-white-line');
   }
   private box(group:THREE.Group,x:number,y:number,z:number,w:number,h:number,d:number,color:number){
@@ -206,16 +208,16 @@ export class GameScene {
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();if(!track.bridges.length)terrainNormals(geometry,this.terrain);
     // A colour overlay on the asphalt, with normal depth occlusion and no
     // raised geometry, collision bodies or shadows from painted markings.
-    surfaceUVs(geometry,2.1);this.addSurface(new THREE.Mesh(geometry,this.assets.roadPaint),SURFACE_ORDER.start,'start-grid-paint');
+    surfaceUVs(geometry,ASPHALT_TEXTURE_METRES);this.addSurface(new THREE.Mesh(geometry,this.assets.roadPaint),SURFACE_ORDER.start,'start-grid-paint');
   }
   setStartLights(litCount:number){
     this.startLightMaterials.forEach((lamp,i)=>{const lit=i<litCount;lamp.color.setHex(lit?0xff493d:0x321b19);lamp.emissive.setHex(lit?0xff1c0c:0x000000);lamp.emissiveIntensity=lit?2.4:0;});
   }
   private makeLandscape(){
-    this.clearGroup(this.landscape);const f=this.terrain,n=f.resolution,positions:number[]=[],colors:number[]=[],indices:number[]=[],base=new THREE.Color(0xffffff),high=new THREE.Color(0xe6dfc9),low=new THREE.Color(0xdce7cc);
+    this.clearGroup(this.landscape);const f=this.terrain,n=f.resolution,positions:number[]=[],colors:number[]=[],indices:number[]=[],tint=new THREE.Color();
     // Keep the complete shared heightfield below every paved surface. Water
     // meets the terrain by depth, rather than deleting its supporting ground.
-    for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=base.clone().lerp(h>=0?high:low,Math.min(.55,Math.abs(h)/70));color.multiplyScalar(.9+.1*Math.sin(wx*.025)*Math.cos(wz*.019));positions.push(wx,h-.025,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
+    for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=terrainGrassColor(wx,wz,h,tint);positions.push(wx,h-.025,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();surfaceUVs(geo,2);const mesh=new THREE.Mesh(geo,this.assets.grass);mesh.receiveShadow=true;this.landscape.add(mesh);
   }
   private sign(text:string,w:number,h:number,bg='#1c3031',fg='#d1ef70'){
@@ -231,7 +233,7 @@ export class GameScene {
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
     for(const type of ['gravel','asphalt'] as const){
-      const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain,type),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,type==='gravel'?GRAVEL_TEXTURE_METRES:2.1);this.addSurface(new THREE.Mesh(runoffGeo,type==='gravel'?this.assets.gravel:this.assets.runoff),type==='gravel'?SURFACE_ORDER.gravel:SURFACE_ORDER.runoff,`track-runoff-${type}`);
+      const runoff=runoffGeometry(rendered,(x,z)=>this.terrain.sample(x,z),this.terrain,type),runoffGeo=new THREE.BufferGeometry();runoffGeo.setAttribute('position',new THREE.Float32BufferAttribute(runoff.vertices,3));runoffGeo.setIndex(runoff.indices);runoffGeo.computeVertexNormals();if(!track.bridges.length)terrainNormals(runoffGeo,this.terrain);surfaceUVs(runoffGeo,type==='gravel'?GRAVEL_TEXTURE_METRES:ASPHALT_TEXTURE_METRES);this.addSurface(new THREE.Mesh(runoffGeo,type==='gravel'?this.assets.gravel:this.assets.runoff),type==='gravel'?SURFACE_ORDER.gravel:SURFACE_ORDER.runoff,`track-runoff-${type}`);
     }
     // Asphalt has top priority, with exact slots for its own white lines. A
     // different road section can therefore cover a conflicting line or kerb.
@@ -337,6 +339,7 @@ export class GameScene {
       const prop=this.assets.clone(name);if(!prop)continue;prop.name=`CC0 ${name}`;prop.position.set(x,this.terrain.sample(x,z)+.035,z);prop.scale.setScalar(scale);prop.rotation.y=name==='truck'?Math.PI/2:Math.PI;this.scenery.add(prop);
     }
     this.detailLayers=addTrackEnvironment(this.scenery,this.track,this.terrain,this.assets,shrubs,land);
+    this.grass=new GrassField(this.track,this.terrain,shrubs,land,this.assets.models.get('groundcover'));this.scenery.add(this.grass);
     this.detailLayers.push(...addGroundContactShadows(this.scenery,this.terrain,trees.map(t=>({x:t.x,z:t.z,radiusX:t.scale*(t.variant===0?.8:.65),radiusZ:t.scale*(t.variant===0?.7:.55),strength:.3,angle:t.x*13.7})),'tree-root-contact-occlusion'));
   }
   frameTrack(){
@@ -416,6 +419,7 @@ export class GameScene {
     const treeViewMoved=this.assets.treeViewPosition.distanceToSquared(this.camera.position)>.0004;this.assets.treeViewPosition.copy(this.camera.position);
     this.scene.updateMatrixWorld();for(const lod of this.treeLODs){const changed=lod.update(this.camera.position),distance=lod.position.distanceTo(this.camera.position);lod.visible=this.mode==='orbit'||distance<1000;if(lod.visible&&(changed||treeViewMoved&&lod.transitioning))this.renderer.shadowMap.needsUpdate=true;}
     for(const layer of this.detailLayers)layer.object.visible=layer.center.distanceToSquared(this.camera.position)<layer.distance*layer.distance;
+    this.grass?.update(this.time,this.camera.position);
     this.contactShadow.update(this.physics);
     this.updateSun();
     if(running||this.time<2)this.renderer.shadowMap.needsUpdate=true;

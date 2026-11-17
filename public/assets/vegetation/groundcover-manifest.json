@@ -1,0 +1,280 @@
+{
+  "license": "CC0-1.0",
+  "file": "groundcover.glb",
+  "bytes": 1803500,
+  "changes": "Artist-authored meshes and UVs; photographic diffuse plus alpha; two mesh LODs sharing textures; additional dense 2.4m meadow patches made from the original complete-cluster atlas.",
+  "sources": [
+    {
+      "id": "grass_medium_01",
+      "url": "https://polyhaven.com/a/grass_medium_01",
+      "license": "CC0-1.0",
+      "sourceFiles": [
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_medium_01/grass_medium_01_1k.gltf",
+          "md5": "28dd8247f3faa749bf87a0b84be01e7e"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_nor_gl_1k.jpg",
+          "md5": "fcf43dd1253f56e4c361079f34155c37"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_diff_1k.jpg",
+          "md5": "6b18ed50d776fd20c1304d9994bd764e"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_arm_1k.jpg",
+          "md5": "37ed2730a507b681af2e9f9f7ef3ae5e"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/grass_medium_01/grass_medium_01.bin",
+          "md5": "e0527a0561c2dae5b7b5c1b478d8c6bf"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/grass_medium_01/grass_medium_01_alpha_1k.png",
+          "md5": "6b5b251ef1ca9a69ab9f49def66d758a"
+        }
+      ],
+      "variants": [
+        {
+          "name": "grass-short-a-near",
+          "sourceNode": "grass_medium_01_small_a_LOD0",
+          "height": 0.17,
+          "triangles": 450
+        },
+        {
+          "name": "grass-short-a-far",
+          "sourceNode": "grass_medium_01_small_a_LOD0",
+          "height": 0.17,
+          "triangles": 150
+        },
+        {
+          "name": "grass-short-b-near",
+          "sourceNode": "grass_medium_01_small_b_LOD0",
+          "height": 0.15,
+          "triangles": 400
+        },
+        {
+          "name": "grass-short-b-far",
+          "sourceNode": "grass_medium_01_small_b_LOD0",
+          "height": 0.15,
+          "triangles": 140
+        }
+      ]
+    },
+    {
+      "id": "grass_medium_02",
+      "url": "https://polyhaven.com/a/grass_medium_02",
+      "license": "CC0-1.0",
+      "sourceFiles": [
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_medium_02/grass_medium_02_1k.gltf",
+          "md5": "dd8f166a6399238553bc3b2931677b68"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+          "md5": "90b4c27b0c0ff058bd37b88bb70784c1"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_02/grass_medium_02_diff_1k.jpg",
+          "md5": "4bb5230e09358d60dd767331685b2d36"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_02/grass_medium_02_arm_1k.jpg",
+          "md5": "2b7a7e6f8b71fd2da62cf172d4784bbb"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/grass_medium_02/grass_medium_02.bin",
+          "md5": "145041ae03fe02783a0adbd1cdcb4988"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/grass_medium_02/grass_medium_02_alpha_1k.png",
+          "md5": "b231cd6a1b5eb7ae21e7c2e626f8318c"
+        }
+      ],
+      "variants": [
+        {
+          "name": "grass-tall-a-near",
+          "sourceNode": "grass_medium_02_a",
+          "height": 0.28,
+          "triangles": 440
+        },
+        {
+          "name": "grass-tall-a-far",
+          "sourceNode": "grass_medium_02_a",
+          "height": 0.28,
+          "triangles": 150
+        },
+        {
+          "name": "grass-tall-b-near",
+          "sourceNode": "grass_medium_02_c",
+          "height": 0.31,
+          "triangles": 550
+        },
+        {
+          "name": "grass-tall-b-far",
+          "sourceNode": "grass_medium_02_c",
+          "height": 0.31,
+          "triangles": 180
+        }
+      ]
+    },
+    {
+      "id": "shrub_sorrel_01",
+      "url": "https://polyhaven.com/a/shrub_sorrel_01",
+      "license": "CC0-1.0",
+      "sourceFiles": [
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_sorrel_01/shrub_sorrel_01_1k.gltf",
+          "md5": "d56d50a8492bd7d7c7a0a571f42239c6"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_sorrel_01/shrub_sorrel_01_nor_gl_1k.jpg",
+          "md5": "71c6c432b91a8d64f2c480366fd61dfb"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/shrub_sorrel_01/shrub_sorrel_01.bin",
+          "md5": "5b6481fc43f4dc36ab4e80d79a19119f"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_sorrel_01/shrub_sorrel_01_arm_1k.jpg",
+          "md5": "6230445a48867ef8196ee1ab052d346d"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_sorrel_01/shrub_sorrel_01_diff_1k.jpg",
+          "md5": "bef299def81bd55c2b378d53dad803b5"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/shrub_sorrel_01/shrub_sorrel_01_alpha_1k.png",
+          "md5": "d73e433a4b041bb19e4dfb4266598e9a"
+        }
+      ],
+      "variants": [
+        {
+          "name": "weed-a-near",
+          "sourceNode": "shrub_sorrel_01_b",
+          "height": 0.16,
+          "triangles": 350
+        },
+        {
+          "name": "weed-a-far",
+          "sourceNode": "shrub_sorrel_01_b",
+          "height": 0.16,
+          "triangles": 110
+        },
+        {
+          "name": "weed-b-near",
+          "sourceNode": "shrub_sorrel_01_a",
+          "height": 0.18,
+          "triangles": 319
+        },
+        {
+          "name": "weed-b-far",
+          "sourceNode": "shrub_sorrel_01_a",
+          "height": 0.18,
+          "triangles": 100
+        }
+      ]
+    },
+    {
+      "id": "shrub_02",
+      "url": "https://polyhaven.com/a/shrub_02",
+      "license": "CC0-1.0",
+      "sourceFiles": [
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_02/shrub_02_1k.gltf",
+          "md5": "8f7254d279c0c49c0b3edfe260aa5c86"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_arm_1k.jpg",
+          "md5": "28c218aeb7cab930d99ee16578984241"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_nor_gl_1k.jpg",
+          "md5": "51a7f2db7e06a207171fd725585241d5"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_02/shrub_02.bin",
+          "md5": "683b5475238310899eac1458520903e6"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_diff_1k.jpg",
+          "md5": "3f4ae281928de030c7d4e41ad5b88a8b"
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/shrub_02/shrub_02_alpha_1k.png",
+          "md5": "64a1f609d80ea076b43412498a3d2db5"
+        }
+      ],
+      "variants": [
+        {
+          "name": "shrub-a-near",
+          "sourceNode": "shrub_02_a",
+          "height": 1.1,
+          "triangles": 2600
+        },
+        {
+          "name": "shrub-a-far",
+          "sourceNode": "shrub_02_a",
+          "height": 1.1,
+          "triangles": 638
+        },
+        {
+          "name": "shrub-b-near",
+          "sourceNode": "shrub_02_b",
+          "height": 0.85,
+          "triangles": 2199
+        },
+        {
+          "name": "shrub-b-far",
+          "sourceNode": "shrub_02_b",
+          "height": 0.85,
+          "triangles": 564
+        }
+      ]
+    }
+  ],
+  "meadow": {
+    "source": "grass_medium_01",
+    "sourceFiles": [
+      {
+        "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/4k/grass_medium_01/grass_medium_01_diff_4k.jpg",
+        "md5": "0beab1cd73aabb4199870bcb73cbb623"
+      },
+      {
+        "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/4k/grass_medium_01/grass_medium_01_alpha_4k.png",
+        "md5": "a83fcb099bafefd89c552d4f0e84dbdc"
+      }
+    ],
+    "atlas": "Photographic complete-cluster cutouts from the original artist atlas; 4K source crops, 1024x512 shared RGBA and normal atlas.",
+    "variants": [
+      {
+        "name": "meadow-a-near",
+        "patchSize": 2.4,
+        "clusters": 36,
+        "triangles": 432,
+        "distribution": "progressive best-candidate blue noise; shared anchors across LODs"
+      },
+      {
+        "name": "meadow-a-far",
+        "patchSize": 2.4,
+        "clusters": 24,
+        "triangles": 144,
+        "distribution": "progressive best-candidate blue noise; shared anchors across LODs"
+      },
+      {
+        "name": "meadow-b-near",
+        "patchSize": 2.4,
+        "clusters": 36,
+        "triangles": 432,
+        "distribution": "progressive best-candidate blue noise; shared anchors across LODs"
+      },
+      {
+        "name": "meadow-b-far",
+        "patchSize": 2.4,
+        "clusters": 24,
+        "triangles": 144,
+        "distribution": "progressive best-candidate blue noise; shared anchors across LODs"
+      }
+    ]
+  }
+}

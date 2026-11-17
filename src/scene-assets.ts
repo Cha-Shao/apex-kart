@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HDRLoader} from 'three/addons/loaders/HDRLoader.js';
-import {stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,roadPaintMaterial,matteFoliage,type RoadWearUniforms} from './surface-materials';
+import {ASPHALT_TEXTURE_METRES,stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,roadPaintMaterial,roadsideMaterial,matteFoliage,type RoadWearUniforms} from './surface-materials';
 import {roadWearTexture} from './road-wear';
 import {foliageMipmaps,TREE_ASSET_BASE,TREE_MODELS} from './foliage';
 import {treeLodFade} from './tree-lod';
+import {foliageCutoutTexture} from './foliage-cutout';
 import type {TrackData} from './track';
 
 const BASE='/assets/cc0/';
@@ -17,6 +18,11 @@ const PBR_FALLBACKS:Record<string,{color:string;roughness:number}>={
   fabric_pattern_07:{color:'#9b5955',roughness:163},
   rubber_tiles:{color:'#1f2125',roughness:191},
 };
+const GRASS_HIGH_TINT=new THREE.Color(0xe6dfc9),GRASS_LOW_TINT=new THREE.Color(0xdce7cc);
+/** Keep terrain and its overhanging turf identical in colour at the seam. */
+export function terrainGrassColor(x:number,z:number,height:number,target=new THREE.Color()){
+  return target.set(0xffffff).lerp(height>=0?GRASS_HIGH_TINT:GRASS_LOW_TINT,Math.min(.55,Math.abs(height)/70)).multiplyScalar(.9+.1*Math.sin(x*.025)*Math.cos(z*.019));
+}
 /** UVs in metres keep road/ground texture scale identical across every circuit. */
 export function surfaceUVs(geometry:THREE.BufferGeometry,metres:number){
   const positions=geometry.getAttribute('position'),uv=new Float32Array(positions.count*2);
@@ -45,8 +51,13 @@ export class SceneAssets {
   readonly ready:Promise<void>;
   readonly grass:THREE.MeshStandardMaterial;
   readonly asphalt:THREE.MeshStandardMaterial;
+  readonly grassVerge:THREE.MeshStandardMaterial;
+  readonly grassFringe:THREE.MeshStandardMaterial;
+  readonly asphaltVerge:THREE.MeshStandardMaterial;
+  readonly runoffVerge:THREE.MeshStandardMaterial;
   readonly runoff:THREE.MeshStandardMaterial;
   readonly gravel:THREE.MeshStandardMaterial;
+  readonly gravelSpill:THREE.MeshStandardMaterial;
   readonly concrete:THREE.MeshStandardMaterial;
   readonly roof:THREE.MeshStandardMaterial;
   readonly paint=new THREE.MeshPhysicalMaterial({color:0xc4ed4c,metalness:.12,roughness:.27,clearcoat:1,clearcoatRoughness:.18});
@@ -74,10 +85,12 @@ export class SceneAssets {
     // Combine source blade normals with centimetre-scale tufts; keep a dry,
     // rough surface while allowing the sun to reveal changes in orientation.
     this.grass=stochasticSurface(this.pbr('grass',0xffffff,.94,1.35),2,.24,{roughnessCenter:.94,sourceRoughness:.55,roughnessContrast:.38,roughnessMin:.86,roughnessMax:1,specular:.65,aggregate:this.grassRelief,aggregateStrength:1.1,ground:'grass'});this.grass.vertexColors=true;this.grass.envMapIntensity=.3;
-    // Source macro relief is restrained; stone detail comes from the packed aggregate.
-    this.asphalt=stochasticSurface(this.pbr('clean_asphalt',0xa5abb2,.9,1.05),2.1,.14,{roughnessCenter:.88,sourceRoughness:.66,roughnessContrast:1.1,roughnessMin:.76,roughnessMax:.99,specular:.7,aggregate:this.asphaltAggregate,aggregateStrength:1.25,ground:'asphalt',roadWear:this.roadWear});this.asphalt.envMapIntensity=.55;
-    this.runoff=stochasticSurface(this.pbr('clean_asphalt',0xf2f3f4,.94,.9),2.1,.16,{roughnessCenter:.93,sourceRoughness:.66,roughnessContrast:.9,roughnessMin:.83,roughnessMax:1,specular:.55,aggregate:this.asphaltAggregate,aggregateStrength:1.05,albedoGain:1.15,ground:'asphalt'});this.runoff.envMapIntensity=.4;
+    // Fine aggregate sits in binder; avoid oversized stones and dark grooves.
+    this.asphalt=stochasticSurface(this.pbr('clean_asphalt',0xa5abb2,.9,.42),ASPHALT_TEXTURE_METRES,.1,{roughnessCenter:.9,sourceRoughness:.66,roughnessContrast:.5,roughnessMin:.84,roughnessMax:.98,specular:.65,aggregate:this.asphaltAggregate,aggregateStrength:.55,ground:'asphalt',roadWear:this.roadWear});this.asphalt.envMapIntensity=.5;
+    this.runoff=stochasticSurface(this.pbr('clean_asphalt',0xf2f3f4,.94,.36),ASPHALT_TEXTURE_METRES,.12,{roughnessCenter:.94,sourceRoughness:.66,roughnessContrast:.45,roughnessMin:.87,roughnessMax:1,specular:.55,aggregate:this.asphaltAggregate,aggregateStrength:.45,albedoGain:1.15,ground:'asphalt'});this.runoff.envMapIntensity=.4;
+    this.grassVerge=roadsideMaterial(this.grass);this.grassFringe=roadsideMaterial(this.grass,'grass-fringe');this.asphaltVerge=roadsideMaterial(this.asphalt,'asphalt');this.runoffVerge=roadsideMaterial(this.runoff,'runoff');
     this.gravel=gravelMaterial();
+    this.gravelSpill=roadsideMaterial(this.gravel,'gravel');
     for(const texture of [this.gravel.map,this.gravel.normalMap,this.gravel.roughnessMap])if(texture)texture.anisotropy=this.anisotropy;
     this.concrete=this.pbr('concrete_layers_02',0xd9d9d4,.94,.45);
     this.roof=this.pbr('corrugated_iron',0x73808b,.65,.5);this.roof.metalness=.75;
@@ -87,10 +100,10 @@ export class SceneAssets {
     this.carbon=this.pbr('fabric_pattern_07',0x15191e,.65,.16,9);this.carbon.map=null;
     this.kerb=paintedSurface(this.pbr('concrete_layers_02',0xffffff,.93,1.25));this.kerb.envMapIntensity=.35;this.kerb.vertexColors=true;this.kerb.name='painted-concrete-kerb';this.kerb.polygonOffset=true;this.kerb.polygonOffsetFactor=-4;this.kerb.polygonOffsetUnits=-4;
     this.roadPaint=roadPaintMaterial(this.texture('clean_asphalt','normal'));
-    for(const material of [this.grass,this.asphalt,this.runoff,this.gravel,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
+    for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
     const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
-    const models=[...vegetation,'kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const tree=vegetation.includes(name),gltf=await new GLTFLoader().loadAsync(`${tree?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=web-trees-1':''}`);
+    const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
+      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=web-trees-1':groundcover?'?v=blue-noise-foliage-3':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
@@ -104,6 +117,7 @@ export class SceneAssets {
             if(occlusion)object.geometry.setAttribute('canopyOcclusion',occlusion);
             matteFoliage(material,!!occlusion);if(material.map)foliageMipmaps(material.map,material.alphaTest);
           }
+          if(groundcover&&material instanceof THREE.MeshStandardMaterial&&material.map)material.map=foliageCutoutTexture(material.map,.4);
         }
       });
       // LODs share identical source textures, including embedded GLB image maps.

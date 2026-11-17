@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+export const ASPHALT_TEXTURE_METRES=1.2;
+
 // Original implementation of triangular stochastic sampling. Reference:
 // Mikkelsen, Practical Real-Time Hex-Tiling, JCGT 11(3), 2022.
 // All PBR channels use the same cells/transforms; normal XY is rotated back.
@@ -118,8 +120,8 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       #ifdef USE_MAP
       vec4 surfaceAggregate=surfaceAggregateSample(surfaceAggregateMap,vMapUv);
       #endif\n`:'';
-    const aggregateAlbedo=aggregate?`diffuseColor.rgb*=mix(${ground==='grass'?'.91,1.04':'.80,1.10'},smoothstep(.18,.82,surfaceAggregate.a));`:'';
-    const aggregateRoughness=aggregate?(ground==='grass'?'+(surfaceAggregate.b-.94)*.45':'+(surfaceAggregate.b-.65)*.18'):'';
+    const aggregateAlbedo=aggregate?`diffuseColor.rgb*=mix(${ground==='grass'?'.91,1.04':'.96,1.035'},smoothstep(.18,.82,surfaceAggregate.a));`:'';
+    const aggregateRoughness=aggregate?(ground==='grass'?'+(surfaceAggregate.b-.94)*.45':'+(surfaceAggregate.b-.87)*.1'):'';
     const groundAlbedo=ground==='grass'?`
       vec2 lawnWorld=vMapUv*${metres.toFixed(4)};
       float lawnPatch=surfaceNoise(lawnWorld/22.0)*.6+surfaceNoise(lawnWorld/73.0+19.0)*.4;
@@ -162,7 +164,7 @@ export function stochasticSurface(material:THREE.MeshStandardMaterial,metres:num
       .replace('#include <normal_fragment_maps>',normalChunk)
       .replace('#include <lights_physical_fragment>',`#include <lights_physical_fragment>\nmaterial.specularColor*=${specular.toFixed(4)};material.specularF90*=${specular.toFixed(4)};`);
   };
-  material.customProgramCacheKey=()=>`stochastic-relief-v8-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${!!roadWear}-${albedoGain}`;
+  material.customProgramCacheKey=()=>`stochastic-relief-v9-${metres}-${variation}-${roughnessCenter}-${roughnessContrast}-${roughnessMin}-${roughnessMax}-${sourceRoughness}-${specular}-${!!aggregate}-${aggregateStrength}-${ground}-${!!roadWear}-${albedoGain}`;
   material.userData.stochastic=true;return material;
 }
 
@@ -191,12 +193,12 @@ export function grassReliefTexture(){
 }
 
 /** One packed tile: RG = tangent normal, B = roughness, A = aggregate height.
- * Adds centimetre-scale relief to the CC0 millimetre grain. It is mipmapped,
+ * Adds fine, embedded stone to the CC0 grain. It is mipmapped,
  * rotates with the source PBR channels and contains no recognisable cracks. */
 export function asphaltAggregateTexture(){
-  const size=512,cells=64,heights=new Float32Array(size*size),data=new Uint8Array(size*size*4),centers=new Float32Array(cells*cells*4);
+  const size=512,cells=128,heights=new Float32Array(size*size),data=new Uint8Array(size*size*4),centers=new Float32Array(cells*cells*4);
   let seed=9173;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
-  for(let i=0;i<cells*cells;i++){centers[i*4]=.16+random()*.68;centers[i*4+1]=.16+random()*.68;centers[i*4+2]=.36+random()*.32;centers[i*4+3]=.65+random()*.35;}
+  for(let i=0;i<cells*cells;i++){centers[i*4]=.16+random()*.68;centers[i*4+1]=.16+random()*.68;centers[i*4+2]=.28+random()*.18;centers[i*4+3]=.65+random()*.35;}
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
     const fx=x/size*cells,fy=y/size*cells,ix=Math.floor(fx),iy=Math.floor(fy);let height=.12;
     for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){
@@ -207,13 +209,78 @@ export function asphaltAggregateTexture(){
     heights[y*size+x]=height;
   }
   const at=(x:number,y:number)=>heights[((y+size)%size)*size+(x+size)%size];
-  // 2.5 mm stone relief across a 2.1 m source tile, with gradual bevels.
-  const slope=.0025/(2.1/size*2);
+  // Sub-millimetre exposed relief: the small stones sit in compacted binder.
+  const slope=.00055/(ASPHALT_TEXTURE_METRES/size*2);
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
     const dx=(at(x+1,y)-at(x-1,y))*slope,dy=(at(x,y+1)-at(x,y-1))*slope,length=Math.hypot(dx,dy,1),i=(y*size+x)*4,h=at(x,y);
-    data[i]=Math.round((.5-dx/length*.5)*255);data[i+1]=Math.round((.5-dy/length*.5)*255);data[i+2]=Math.round((.90-h*.42)*255);data[i+3]=Math.round(h*255);
+    data[i]=Math.round((.5-dx/length*.5)*255);data[i+1]=Math.round((.5-dy/length*.5)*255);data[i+2]=Math.round((.91-h*.1)*255);data[i+3]=Math.round(h*255);
   }
   const texture=new THREE.DataTexture(data,size,size);texture.name='asphalt-aggregate-normal-roughness';texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.generateMipmaps=true;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.magFilter=THREE.LinearFilter;texture.needsUpdate=true;texture.userData.sharedCC0=true;return texture;
+}
+
+/** Boundary overlays share the original PBR shading. Soil remains below
+ * paving; grass tips and loose gravel sit just above their receiving surface.
+ * verge.x is metres outside the paved edge; verge.y selects road (+1) or
+ * lighter runoff (-1), with zero reserved for kerbs and gravel. */
+export function roadsideMaterial(source:THREE.MeshStandardMaterial,surface:'grass'|'grass-fringe'|'asphalt'|'runoff'|'gravel'='grass'){
+  const asphalt=surface==='asphalt'||surface==='runoff',fringe=surface==='grass-fringe',material=source.clone();material.name=asphalt?`irregular-${surface}-fringe`:surface==='gravel'?'loose-gravel-spill':fringe?'grass-overhanging-paved-edge':'worn-grass-verge';
+  material.transparent=true;material.depthTest=true;material.depthWrite=false;material.depthFunc=THREE.LessDepth;material.polygonOffset=false;
+  material.onBeforeCompile=(shader,renderer)=>{
+    source.onBeforeCompile(shader,renderer);
+    shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>\nattribute vec2 verge;varying vec2 vVerge;${fringe?'\nattribute float vergeGrass;varying float vVergeGrass;':''}`).replace('#include <begin_vertex>',`#include <begin_vertex>\nvVerge=verge;${fringe?'\nvVergeGrass=vergeGrass;':''}`);
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>\nvarying vec2 vVerge;${fringe?'\nvarying float vVergeGrass;':''}`)
+      .replace('#include <alphatest_fragment>',fringe?`
+        vec2 vergeWorld=vMapUv*2.0;
+        float grassPatch=surfaceNoise(vergeWorld*3.7+23.0);
+        float grassTips=surfaceNoise(vergeWorld*38.0+7.0);
+        float grassReach=.035+grassPatch*.05+grassTips*.025;
+        float grassAA=max(.0015,fwidth(vVerge.x)*.6);
+        // Continuous turf reaches across the kerb edge, ending in small,
+        // irregular tips. It remains visible when blade instances are culled.
+        float grassInner=smoothstep(-grassReach-grassAA,-grassReach+grassAA,vVerge.x);
+        float grassOuter=1.0-smoothstep(.035,.16,vVerge.x);
+        diffuseColor.a*=clamp(vVergeGrass,0.0,1.0)*grassInner*grassOuter;
+        if(diffuseColor.a<.001)discard;
+        #include <alphatest_fragment>
+      `:surface==='gravel'?`
+        vec2 vergeWorld=vMapUv*${GRAVEL_TEXTURE_METRES.toFixed(4)};
+        float gravelReach=.12+surfaceNoise(vergeWorld*3.0)*.2;
+        float gravelFade=1.0-smoothstep(0.0,gravelReach,vVerge.x);
+        // Packed height follows the very same stone footprints as the colour
+        // and normals, so the spill consists of grains rather than a flat band.
+        float gravelHeight=surfaceSample(normalMap,vNormalMapUv).a;
+        float gravelStone=smoothstep(.1,.2,gravelHeight);
+        float gravelPatch=.35+.65*smoothstep(.27,.68,surfaceNoise(vergeWorld*17.0+13.0));
+        float gravelPixel=max(length(dFdx(vergeWorld)),length(dFdy(vergeWorld)));
+        float gravelDetail=1.0-smoothstep(.003,.02,gravelPixel);
+        float gravelScatter=mix(.12,gravelStone*gravelPatch,gravelDetail)*gravelFade*gravelFade;
+        float gravelBed=1.0-smoothstep(-.025,.006,vVerge.x);
+        diffuseColor.a*=max(gravelBed,gravelScatter);
+        if(diffuseColor.a<.001)discard;
+        #include <alphatest_fragment>
+      `:asphalt?`
+        vec2 vergeWorld=vMapUv*${ASPHALT_TEXTURE_METRES.toFixed(4)};
+        float vergeFine=1.0-smoothstep(.015,.075,fwidth(vVerge.x));
+        float vergeReach=.012+surfaceNoise(vergeWorld*9.0)*.025+(surfaceNoise(vergeWorld*43.0)-.5)*.022*vergeFine;
+        float vergeAA=max(.002,fwidth(vVerge.x));
+        diffuseColor.a*=clamp(vVerge.y*${surface==='runoff'?'-1.0':'1.0'},0.0,1.0)*(1.0-smoothstep(vergeReach-vergeAA,vergeReach+vergeAA,vVerge.x));
+        if(diffuseColor.a<.001)discard;
+        #include <alphatest_fragment>
+      `:`
+        vec2 vergeWorld=vMapUv*2.0;
+        float vergePatch=surfaceNoise(vergeWorld*2.3+17.0);
+        float vergeWidth=.14+surfaceNoise(vergeWorld*.8)*.27;
+        float vergeDry=(1.0-smoothstep(.01,vergeWidth,vVerge.x))*(.3+.7*vergePatch);
+        // Local straw and exposed soil, fading into the existing lawn.
+        diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.25,1.04,.64)+vec3(.014,.009,.003),vergeDry*.7);
+        float vergeSoil=(1.0-smoothstep(.015,.055+vergePatch*.075,vVerge.x))*smoothstep(.3,.72,surfaceNoise(vergeWorld*21.0));
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.09,.067,.036),vergeSoil*.48);
+        diffuseColor.a*=1.0-smoothstep(vergeWidth*.55,vergeWidth,vVerge.x);
+        if(diffuseColor.a<.001)discard;
+        #include <alphatest_fragment>
+      `);
+  };
+  material.customProgramCacheKey=()=>`${source.customProgramCacheKey()}-roadside-v3-${surface}`;return material;
 }
 
 export const GRAVEL_TEXTURE_METRES=.6;
@@ -251,7 +318,7 @@ export function gravelMaterial(){
   const at=(x:number,y:number)=>heights[wrap(y)*size+wrap(x)],slope=1/(2*metres/size);
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
     const dx=(at(x+1,y)-at(x-1,y))*slope,dy=(at(x,y+1)-at(x,y-1))*slope,length=Math.hypot(dx,dy,1),i=(y*size+x)*4;
-    normals[i]=Math.round((.5-dx/length*.5)*255);normals[i+1]=Math.round((.5-dy/length*.5)*255);normals[i+2]=Math.round((.5+.5/length)*255);normals[i+3]=255;
+    normals[i]=Math.round((.5-dx/length*.5)*255);normals[i+1]=Math.round((.5-dy/length*.5)*255);normals[i+2]=Math.round((.5+.5/length)*255);normals[i+3]=Math.round(Math.min(1,at(x,y)/.006)*255);
   }
   const texture=(data:Uint8Array,name:string,color=false)=>{
     const map=new THREE.DataTexture(data,size,size);map.name=`gravel-${name}`;map.colorSpace=color?THREE.SRGBColorSpace:THREE.NoColorSpace;map.wrapS=map.wrapT=THREE.RepeatWrapping;map.generateMipmaps=true;map.minFilter=THREE.LinearMipmapLinearFilter;map.magFilter=THREE.LinearFilter;map.needsUpdate=true;map.userData.sharedCC0=true;return map;
@@ -262,7 +329,7 @@ export function gravelMaterial(){
 
 /** Dry road paint follows the asphalt grain instead of reading as a white decal. */
 export function roadPaintMaterial(normalMap:THREE.Texture){
-  const material=new THREE.MeshStandardMaterial({color:0xbab9ad,normalMap,normalScale:new THREE.Vector2(.3,.3),roughness:.97,metalness:0,envMapIntensity:.18});
+  const material=new THREE.MeshStandardMaterial({color:0xbab9ad,normalMap,normalScale:new THREE.Vector2(.18,.18),roughness:.97,metalness:0,envMapIntensity:.18});
   material.name='worn-grey-white-road-paint';
   material.onBeforeCompile=shader=>{
     shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vPaintPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nvPaintPosition=position.xz;');
