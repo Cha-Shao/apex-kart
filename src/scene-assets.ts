@@ -3,9 +3,10 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HDRLoader} from 'three/addons/loaders/HDRLoader.js';
 import {ASPHALT_TEXTURE_METRES,stochasticSurface,tyreMaterial,asphaltAggregateTexture,grassReliefTexture,gravelMaterial,paintedSurface,roadPaintMaterial,roadsideMaterial,matteFoliage,type RoadWearUniforms} from './surface-materials';
 import {roadWearTexture} from './road-wear';
-import {foliageMipmaps,TREE_ASSET_BASE,TREE_MODELS} from './foliage';
+import {TREE_ASSET_BASE,TREE_MODELS} from './foliage';
 import {treeLodFade} from './tree-lod';
 import {foliageCutoutTexture} from './foliage-cutout';
+import {daylightSky} from './daylight';
 import type {TrackData} from './track';
 
 const BASE='/assets/cc0/';
@@ -79,6 +80,7 @@ export class SceneAssets {
   private readonly anisotropy:number;
   private readonly loader=new THREE.TextureLoader();
   constructor(renderer:THREE.WebGLRenderer,scene:THREE.Scene,invalidate:()=>void){
+    const foliageMSAA=renderer.getContext().getContextAttributes()?.antialias===true;
     this.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());this.asphaltAggregate.anisotropy=this.anisotropy;this.grassRelief.anisotropy=this.anisotropy;
     this.maxTextureSize=renderer.capabilities.maxTextureSize;
     this.invalidate=invalidate;
@@ -103,41 +105,46 @@ export class SceneAssets {
     for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
     const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
     const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=web-trees-1':groundcover?'?v=blue-noise-foliage-3':''}`);
+      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-lighting-2':groundcover?'?v=blue-noise-foliage-3':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
         object.geometry.userData.sharedCC0=true;object.castShadow=true;object.receiveShadow=true;
         for(const material of Array.isArray(object.material)?object.material:[object.material]){
+          if(groundcover)material.alphaToCoverage=foliageMSAA;
           material.userData.sharedCC0=true;
           for(const value of Object.values(material))if(value instanceof THREE.Texture){value.anisotropy=this.anisotropy;value.userData.sharedCC0=true;}
           // Alpha testing writes depth and gives stable foliage shadows without sorting artifacts.
           if(material instanceof THREE.MeshStandardMaterial&&/leaves|twig/.test(material.name)){
             const occlusion=object.geometry.getAttribute('_canopy_occlusion');
             if(occlusion)object.geometry.setAttribute('canopyOcclusion',occlusion);
-            matteFoliage(material,!!occlusion);if(material.map)foliageMipmaps(material.map,material.alphaTest);
+            const leafNormal=object.geometry.getAttribute('_leaf_normal');
+            if(leafNormal)object.geometry.setAttribute('leafSurfaceNormal',leafNormal);
+            matteFoliage(material,!!occlusion,!!leafNormal);material.alphaToCoverage=foliageMSAA;
           }
-          if(groundcover&&material instanceof THREE.MeshStandardMaterial&&material.map)material.map=foliageCutoutTexture(material.map,.4);
         }
       });
       // LODs share identical source textures, including embedded GLB image maps.
       gltf.scene.traverse(object=>{if(object instanceof THREE.Mesh)for(const material of Array.isArray(object.material)?object.material:[object.material]){
-        for(const slot of ['map','normalMap','roughnessMap','metalnessMap','aoMap'] as const){const standard=material as THREE.MeshStandardMaterial,texture=standard[slot];if(!texture)continue;const key=`embedded/${material.name}/${slot}`;const shared=this.textures.get(key);if(shared&&shared!==texture){texture.dispose();standard[slot]=shared;}else if(!shared)this.textures.set(key,texture);}
+        for(const slot of ['map','normalMap','roughnessMap','metalnessMap','aoMap'] as const){
+          const standard=material as THREE.MeshStandardMaterial,texture=standard[slot];if(!texture)continue;
+          const key=`embedded/${material.name}/${slot}`,shared=this.textures.get(key);
+          if(shared){if(shared!==texture){texture.dispose();standard[slot]=shared;}continue;}
+          const cutout=slot==='map'&&(groundcover||tree&&/leaves|twig/.test(material.name));
+          const prepared=cutout?foliageCutoutTexture(texture,groundcover ? .4 : standard.alphaTest):texture;
+          prepared.userData.sharedCC0=true;standard[slot]=prepared;this.textures.set(key,prepared);
+          if(prepared!==texture)texture.dispose();
+        }
       }});
       this.models.set(name,gltf.scene);
     });
-    const sky=new HDRLoader().loadAsync(`${BASE}sunny-sky.hdr`).then(texture=>{
+    const sky=new HDRLoader().setDataType(THREE.HalfFloatType).loadAsync(`${BASE}sunny-sky.hdr`).then(texture=>{
       texture.mapping=THREE.EquirectangularReflectionMapping;
-      const {data,width,height}=texture.image as {data:Uint16Array;width:number;height:number};
-      let brightest=0,bestX=width/3,bestY=height*.2;
-      for(let y=0;y<Math.floor(height*.44);y++)for(let x=0;x<width;x++){
-        const i=(y*width+x)*4,luminance=THREE.DataUtils.fromHalfFloat(data[i])*.2126+THREE.DataUtils.fromHalfFloat(data[i+1])*.7152+THREE.DataUtils.fromHalfFloat(data[i+2])*.0722;
-        if(luminance>brightest){brightest=luminance;bestX=x;bestY=y;}
-      }
-      const azimuth=((bestX+.5)/width-.5)*Math.PI*2,elevation=(.5-(bestY+.5)/height)*Math.PI;
-      this.sunDirection.set(Math.cos(elevation)*Math.cos(azimuth),Math.sin(elevation),Math.cos(elevation)*Math.sin(azimuth));
-      const pmrem=new THREE.PMREMGenerator(renderer),environment=pmrem.fromEquirectangular(texture);
-      // HDR supplies broad sky irradiance/reflections in addition to the sun.
+      const daylight=daylightSky(texture);this.sunDirection.copy(daylight.sunDirection);
+      const pmrem=new THREE.PMREMGenerator(renderer),environment=pmrem.fromEquirectangular(daylight.sky);
+      daylight.sky.dispose();
+      // Retain broad HDR sky and ground bounce. Only the directional light
+      // supplies the solar disc, so it can be occluded by the scene's shadows.
       scene.environment=environment.texture;scene.environmentIntensity=.58;
       scene.background=texture;scene.backgroundIntensity=1.1;scene.backgroundBlurriness=0;pmrem.dispose();invalidate();
     });

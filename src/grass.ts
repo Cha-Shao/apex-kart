@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {foliageAlphaTestGLSL} from './foliage-cutout';
 import {bridgeHeight,curbWidth,roadFootprint,type Point,type TrackData} from './track';
 import {FootprintIndex,polygonDistance} from './track-footprint';
 import {surfaceTrack} from './surface-track';
@@ -180,7 +181,7 @@ export class GrassField extends THREE.Group {
   private plantMaterial(source:THREE.Material|THREE.Material[],model:PlantModel,level:number,birth=-1000,edge?:MeadowEdge){
     const original=Array.isArray(source)?source[0]:source;
     const material=(original as THREE.MeshStandardMaterial).clone();material.userData.sharedCC0=false;
-    material.name=`${original.name}-lod-${level}`;material.transparent=false;material.alphaTest=.4;material.alphaToCoverage=true;
+    material.name=`${original.name}-lod-${level}`;material.transparent=false;material.alphaTest=.4;material.alphaToCoverage=original.alphaToCoverage;
     material.side=THREE.DoubleSide;material.depthTest=true;material.depthWrite=true;material.roughness=1;material.metalness=0;material.envMapIntensity=.6;material.aoMapIntensity=.28;
     material.normalScale.multiplyScalar(model.patch?.55:.75);
     material.onBeforeCompile=shader=>{
@@ -234,11 +235,30 @@ export class GrassField extends THREE.Group {
           float flutter=sin(plantWorld.z*1.6-plantTime*2.1+position.y*9.0);
           transformed.x+=(wave*.018+flutter*.006)*plantHeight*plantHeight*(.3+.7*plantGrowth);
           transformed.z+=wave*.012*plantHeight*plantHeight*(.3+.7*plantGrowth);
+          #ifdef TEMPORAL_MOTION
+          float oldWave=sin(plantWorld.x*.63+plantWorld.z*.42+temporalPreviousTime*1.55);
+          float oldFlutter=sin(plantWorld.z*1.6-temporalPreviousTime*2.1+position.y*9.0);
+          float motionWeight=plantHeight*plantHeight*(.3+.7*plantGrowth);
+          temporalPreviousOffset=vec3(((oldWave-wave)*.018+(oldFlutter-flutter)*.006)*motionWeight,0.0,(oldWave-wave)*.012*motionWeight);
+          #endif
         `);
       shader.fragmentShader=shader.fragmentShader
         .replace('#include <common>',`#include <common>\n${vegetationPaletteGLSL}\nvarying float vPlantHeight;varying float vPlantDistance;varying float vPlantJitter;varying float vPlantReady;varying float vPlantVisible;`)
+        .replace('#include <lights_physical_pars_fragment>',`#include <lights_physical_pars_fragment>
+          void RE_Direct_Plant(const in IncidentLight light,const in vec3 p,const in vec3 n,const in vec3 v,const in vec3 cc,const in PhysicalMaterial m,inout ReflectedLight reflected){
+            RE_Direct_Physical(light,p,n,v,cc,m,reflected);
+            float noL=dot(n,light.direction);
+            float wrap=max(0.0,clamp((noL+.35)/1.35,0.0,1.0)-max(noL,0.0));
+            float phase=pow(max(dot(v,-light.direction),0.0),4.0);
+            float thin=mix(.2,.48,smoothstep(.05,.9,vPlantHeight));
+            float backlight=max(-noL,0.0)*thin*(.65+.35*phase);
+            reflected.directDiffuse+=light.color*BRDF_Lambert(m.diffuseColor)*(vec3(wrap*.45)+vec3(.95,1.0,.94)*backlight);
+          }
+          #undef RE_Direct
+          #define RE_Direct RE_Direct_Plant
+        `)
         .replace('#include <map_fragment>','#include <map_fragment>\ndiffuseColor.rgb=vegetationAlbedo(diffuseColor.rgb,.94);')
-        .replace('#include <alphatest_fragment>',`#include <alphatest_fragment>
+        .replace('#include <alphatest_fragment>',`${foliageAlphaTestGLSL}
           if(vPlantVisible<.5)discard;
           float plantNear=1.0-smoothstep(${model.lodStart.toFixed(1)},${model.lodEnd.toFixed(1)},vPlantDistance);
           float plantFade=1.0-smoothstep(${model.fadeStart.toFixed(1)}-vPlantJitter,${model.fadeEnd.toFixed(1)}-vPlantJitter,vPlantDistance);
@@ -268,19 +288,9 @@ export class GrassField extends THREE.Group {
           vec3 plantTransmissionTint=vec3(.95,1.0,.94);
           reflectedLight.indirectDiffuse=reflectedLight.indirectDiffuse*.62+plantBackIrradiance*BRDF_Lambert(material.diffuseColor)*plantTransmissionTint*.38;
           reflectedLight.indirectDiffuse*=mix(.96,1.0,vPlantHeight);
-          #if NUM_DIR_LIGHTS == 1
-          // Cheap two-sided foliage wrap / transmission, following the
-          // published Crytek approach. Sun shadowing also gates this BTDF.
-          float plantNoL=dot(geometryNormal,directionalLights[0].direction);
-          float plantWrap=max(0.0,clamp((plantNoL+.35)/1.35,0.0,1.0)-max(plantNoL,0.0));
-          float plantPhase=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.0),4.0);
-          float plantThin=mix(.2,.48,smoothstep(.05,.9,vPlantHeight));
-          float plantBacklight=max(-plantNoL,0.0)*plantThin*(.65+.35*plantPhase);
-          reflectedLight.directDiffuse+=directLight.color*BRDF_Lambert(material.diffuseColor)*(vec3(plantWrap*.45)+plantTransmissionTint*plantBacklight);
-          #endif
         `);
     };
-    material.customProgramCacheKey=()=>`two-sided-edge-groundcover-v6-${model.patch}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
+    material.customProgramCacheKey=()=>`two-sided-edge-groundcover-v7-${model.patch}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
   }
 
   update(time:number,view:THREE.Vector3){

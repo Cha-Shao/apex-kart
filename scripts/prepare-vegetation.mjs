@@ -47,24 +47,33 @@ function barkPrimitive(document,buffer,geometry,scale,uvScale){
 }
 
 function leafPrimitive(document,buffer,geometry,scale,level){
-  const source=geometry.attributes.position.array,sourceUv=geometry.attributes.uv.array,sourceNormal=geometry.attributes.normal.array,positions=[],normals=[],uvs=[],occlusion=[],indices=[];
+  const source=geometry.attributes.position.array,sourceUv=geometry.attributes.uv.array,sourceNormal=geometry.attributes.normal.array,positions=[],normals=[],leafNormals=[],uvs=[],occlusion=[],indices=[];
   geometry.computeBoundingBox();const bounds=geometry.boundingBox,center=bounds.getCenter(new THREE.Vector3()),extent=bounds.getSize(new THREE.Vector3());
+  const radii=extent.clone().multiplyScalar(.5).max(new THREE.Vector3(.1,.1,.1));
   const stride=[1,2,4][level],enlargement=[1,1.18,1.42][level],groups=source.length/24;
   // Keep crossed leaf-cluster pairs together and retain deterministic anchors.
   for(let group=0;group<groups;group+=stride){
     const start=group*8,anchor=new THREE.Vector3();for(let j=0;j<8;j++)anchor.add(new THREE.Vector3().fromArray(source,(start+j)*3));anchor.multiplyScalar(1/8);
     const radial=anchor.clone().sub(center).divide(new THREE.Vector3(Math.max(extent.x,.1),Math.max(extent.y,.1),Math.max(extent.z,.1))),height=(anchor.y-bounds.min.y)/Math.max(extent.y,.1);
-    const access=Math.min(1,.6+.22*Math.min(1,radial.length()*2)+.16*height);radial.normalize();
+    // A bounded volume-access approximation, shared by all LODs, rather than
+    // ray-traced AO. It only attenuates indirect light in the runtime shader.
+    const access=Math.min(1,.6+.22*Math.min(1,radial.length()*2)+.16*height);
     const base=positions.length/3;
     for(let j=0;j<8;j++){
-      const i=start+j,p=new THREE.Vector3().fromArray(source,i*3).sub(anchor).multiplyScalar(enlargement).add(anchor).multiplyScalar(scale),normal=new THREE.Vector3().fromArray(sourceNormal,i*3);
-      normal.multiplyScalar(.25).addScaledVector(radial,.75).normalize();positions.push(...p.toArray());normals.push(...normal.toArray());uvs.push(sourceUv[i*2],1-sourceUv[i*2+1]);occlusion.push(access);
+      const i=start+j,sourcePosition=new THREE.Vector3().fromArray(source,i*3),p=sourcePosition.clone().sub(anchor).multiplyScalar(enlargement).add(anchor).multiplyScalar(scale);
+      const surfaceNormal=new THREE.Vector3().fromArray(sourceNormal,i*3).normalize();
+      // The ellipsoid gradient gives a continuous envelope normal field.
+      // Evaluate at the original vertex so every LOD keeps the same lighting.
+      const envelope=sourcePosition.sub(center).divide(radii).divide(radii).normalize();if(envelope.lengthSq()<.001)envelope.set(0,1,0);
+      const normal=surfaceNormal.clone();if(normal.dot(envelope)<0)normal.negate();normal.multiplyScalar(.18).addScaledVector(envelope,.82).normalize();
+      positions.push(...p.toArray());normals.push(...normal.toArray());leafNormals.push(...surfaceNormal.toArray());uvs.push(sourceUv[i*2],1-sourceUv[i*2+1]);occlusion.push(access);
     }
     for(const offset of [0,4]){const i=base+offset;indices.push(i,i+1,i+2,i,i+2,i+3);}
   }
   return document.createPrimitive()
     .setAttribute('POSITION',accessor(document,buffer,'VEC3',new Float32Array(positions)))
     .setAttribute('NORMAL',accessor(document,buffer,'VEC3',new Float32Array(normals)))
+    .setAttribute('_LEAF_NORMAL',accessor(document,buffer,'VEC3',new Float32Array(leafNormals)))
     .setAttribute('TEXCOORD_0',accessor(document,buffer,'VEC2',new Float32Array(uvs)))
     .setAttribute('_CANOPY_OCCLUSION',accessor(document,buffer,'SCALAR',new Float32Array(occlusion)))
     .setIndices(accessor(document,buffer,'SCALAR',new Uint16Array(indices)));
@@ -84,7 +93,7 @@ export async function prepareVegetation({cache='test-results/asset-source',outpu
       const barkMaterial=document.createMaterial(`${id}-bark`).setMetallicFactor(0).setRoughnessFactor(.94)
         .setBaseColorTexture(await texture(document,path.join(dir,'src/lib/assets/bark/oak_color_1k.jpg'),'oak-bark-color',512))
         .setNormalTexture(await texture(document,path.join(dir,'src/lib/assets/bark/oak_normal_1k.jpg'),'oak-bark-normal',256,false)).setNormalScale(.5);
-      const leafMaterial=document.createMaterial(`${id}-leaves`).setMetallicFactor(0).setRoughnessFactor(1).setAlphaMode('MASK').setAlphaCutoff(.45).setDoubleSided(true)
+      const leafMaterial=document.createMaterial(`${id}-leaves`).setMetallicFactor(0).setRoughnessFactor(1).setAlphaMode('MASK').setAlphaCutoff(.5).setDoubleSided(true)
         .setBaseColorTexture(await texture(document,path.join(dir,`src/lib/assets/leaves/${id}_color.png`),`${id}-leaf-cluster`,512));
       bark.setMaterial(barkMaterial);leaves.setMaterial(leafMaterial);
       const root=document.createNode(id);for(const [name,primitive] of [['bark',bark],['leaves',leaves]])root.addChild(document.createNode(`${id}-${name}`).setMesh(document.createMesh(`${id}-${name}`).addPrimitive(primitive)));document.createScene(id).addChild(root);
@@ -95,7 +104,7 @@ export async function prepareVegetation({cache='test-results/asset-source',outpu
       if(bytes.byteLength>1024*1024)throw Error(`${file} exceeds the 1 MiB web asset budget (${bytes.byteLength} bytes)`);
       await fs.writeFile(path.join(output,file),bytes);files.push(file);lods.push({file,bytes:bytes.byteLength,triangles});
     }
-    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Generator and source archive are not shipped.'});console.log(id,lods);
+    records.push({id,source:'https://github.com/dgreenheck/ez-tree',version:VERSION,author:'Daniel Greenheck',license:'MIT',licenseFile:'EZ-Tree-LICENSE.txt',files,height,seed,lods,changes:'Offline low-poly EZ-Tree preset. Natural branching and photographic alpha leaf clusters; 512px colour and 256px bark normals. Paired leaf cards and shared anchors across LODs. Continuous ellipsoid envelope normals; original card normals retained as _LEAF_NORMAL for two-sided transmission. Bounded canopy-volume access approximation, not ray-traced AO. Generator and source archive are not shipped.'});console.log(id,lods);
   }
   const manifest={license:'MIT; bark textures CC0-1.0',assets:records,barkSource:{url:'https://polyhaven.com/a/bark_brown_02',license:'CC0-1.0'},budgets:{maxGlbBytes:1024*1024,colorTextureSize:512,barkNormalSize:256}};
   await fs.writeFile(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');return records;

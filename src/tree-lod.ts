@@ -33,12 +33,14 @@ export function treeLodFade(material:THREE.Material,level:number,viewPosition:TH
       `);
     shader.fragmentShader=shader.fragmentShader
       .replace('#include <common>','#include <common>\nvarying float vTreeLodDistance;')
-      .replace('#include <alphatest_fragment>',`#include <alphatest_fragment>
+      // Both colour and depth shaders retain this hook after alpha testing,
+      // including foliage materials that provide their own MSAA edge filter.
+      .replace('#include <alphahash_fragment>',`#include <alphahash_fragment>
         float treeNearOut=1.0-smoothstep(${NEAR_BAND[0].toFixed(1)},${NEAR_BAND[1].toFixed(1)},vTreeLodDistance);
         float treeMidOut=1.0-smoothstep(${FAR_BAND[0].toFixed(1)},${FAR_BAND[1].toFixed(1)},vTreeLodDistance);
         float treeLodNoise=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(.06711056,.00583715))));
         ${level===0?'if(treeLodNoise>=treeNearOut)discard;':level===1?'if(treeLodNoise<treeNearOut||treeLodNoise>=treeMidOut)discard;':'if(treeLodNoise<treeMidOut)discard;'}
       `);
   };
-  material.customProgramCacheKey=()=>`${cacheKey}:tree-crossfade-v1-${level}`;return material;
+  material.customProgramCacheKey=()=>`${cacheKey}:tree-crossfade-v2-${level}`;return material;
 }

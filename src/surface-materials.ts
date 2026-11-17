@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {foliageAlphaTestGLSL} from './foliage-cutout';
 import {vegetationPaletteGLSL} from './vegetation-palette';
 
 export const ASPHALT_TEXTURE_METRES=1.2;
@@ -352,15 +353,67 @@ export function roadPaintMaterial(normalMap:THREE.Texture){
 }
 
 /** Clamp the sampled roughness too: roughness=1 still multiplies the source map. */
-export function matteFoliage(material:THREE.MeshStandardMaterial,volume=false){
-  material.transparent=false;material.alphaTest=.45;material.alphaHash=false;material.alphaToCoverage=false;material.depthWrite=true;material.side=THREE.DoubleSide;
+export function matteFoliage(material:THREE.MeshStandardMaterial,volume=false,leafNormals=false){
+  material.transparent=false;material.alphaTest=.5;material.alphaHash=false;material.alphaToCoverage=true;material.depthTest=true;material.depthWrite=true;material.side=THREE.DoubleSide;material.shadowSide=THREE.DoubleSide;
   material.metalness=0;material.roughness=1;material.envMapIntensity=.42;material.normalScale.set(.18,.18);material.color.multiply(new THREE.Color(0xe0e9d5));
+  const canopyDefines=`${volume?'#define CANOPY_VOLUME\n':''}${leafNormals?'#define LEAF_SURFACE_NORMAL\n':''}`;
   material.onBeforeCompile=shader=>{
     shader.vertexShader=shader.vertexShader
-      .replace('#include <common>',`#include <common>\n${volume?'#define CANOPY_VOLUME\n':''}#ifdef CANOPY_VOLUME\nattribute float canopyOcclusion;varying float vCanopyOcclusion;\n#endif`)
+      .replace('#include <common>',`#include <common>\n${canopyDefines}
+        #ifdef CANOPY_VOLUME
+        attribute float canopyOcclusion;varying float vCanopyOcclusion;
+        #endif
+        #ifdef LEAF_SURFACE_NORMAL
+        attribute vec3 leafSurfaceNormal;varying vec3 vLeafSurfaceNormal;
+        #endif
+      `)
+      .replace('#include <defaultnormal_vertex>',`#include <defaultnormal_vertex>
+        #ifdef LEAF_SURFACE_NORMAL
+        vec3 leafNormal=leafSurfaceNormal;
+        #ifdef USE_INSTANCING
+        // Match Three.js inverse-scale normal transform for stretched trees.
+        mat3 leafInstance=mat3(instanceMatrix);
+        leafNormal/=vec3(dot(leafInstance[0],leafInstance[0]),dot(leafInstance[1],leafInstance[1]),dot(leafInstance[2],leafInstance[2]));
+        leafNormal=leafInstance*leafNormal;
+        #endif
+        vLeafSurfaceNormal=normalize(normalMatrix*leafNormal);
+        #endif
+      `)
       .replace('#include <begin_vertex>','#include <begin_vertex>\n#ifdef CANOPY_VOLUME\nvCanopyOcclusion=canopyOcclusion;\n#endif');
     shader.fragmentShader=shader.fragmentShader
-      .replace('#include <common>',`#include <common>\n${vegetationPaletteGLSL}\n${volume?'#define CANOPY_VOLUME\n':''}#ifdef CANOPY_VOLUME\nvarying float vCanopyOcclusion;\n#endif`)
+      .replace('#include <common>',`#include <common>\n${vegetationPaletteGLSL}\n${canopyDefines}
+        #ifdef CANOPY_VOLUME
+        varying float vCanopyOcclusion;
+        #endif
+        #ifdef LEAF_SURFACE_NORMAL
+        varying vec3 vLeafSurfaceNormal;
+        #endif
+      `)
+      .replace('#include <lights_physical_pars_fragment>',`#include <lights_physical_pars_fragment>
+        #ifdef CANOPY_VOLUME
+        void RE_Direct_Canopy(const in IncidentLight leafLight,const in vec3 leafPosition,const in vec3 canopyNormal,const in vec3 leafView,const in vec3 clearcoatNormal,const in PhysicalMaterial leafMaterial,inout ReflectedLight leafReflected){
+          RE_Direct_Physical(leafLight,leafPosition,canopyNormal,leafView,clearcoatNormal,leafMaterial,leafReflected);
+          vec3 surfaceNormal=canopyNormal;
+          #ifdef LEAF_SURFACE_NORMAL
+          surfaceNormal=normalize(vLeafSurfaceNormal);
+          #endif
+          // Only the physical leaf normal follows the visible side. The
+          // envelope normal stays outward to shade the crown as one volume.
+          surfaceNormal*=dot(surfaceNormal,leafView)<0.0?-1.0:1.0;
+          float access=clamp(vCanopyOcclusion,.18,1.0);
+          float noL=dot(canopyNormal,leafLight.direction);
+          float wrap=max(0.0,clamp((noL+.3)/1.3,0.0,1.0)-max(noL,0.0));
+          vec3 scatterDirection=normalize(leafLight.direction+surfaceNormal*.2);
+          float forwardScatter=pow(max(dot(leafView,-scatterDirection),0.0),4.0);
+          float transmission=max(-dot(surfaceNormal,leafLight.direction),0.0)*(.22+.48*forwardScatter)*access*access;
+          // The renderer calls RE_Direct after applying each light's shadow.
+          // This also keeps transmission dark behind trunks and buildings.
+          leafReflected.directDiffuse+=leafLight.color*BRDF_Lambert(leafMaterial.diffuseColor)*(vec3(wrap*.3)+vec3(.95,1.0,.74)*transmission);
+        }
+        #undef RE_Direct
+        #define RE_Direct RE_Direct_Canopy
+        #endif
+      `)
       .replace('#include <map_fragment>',`#include <map_fragment>
         diffuseColor.rgb=vegetationAlbedo(diffuseColor.rgb,.82);
         #ifdef CANOPY_VOLUME
@@ -368,6 +421,7 @@ export function matteFoliage(material:THREE.MeshStandardMaterial,volume=false){
         diffuseColor.rgb*=mix(vec3(.84,.94,.9),vec3(1.0,.99,.91),smoothstep(.22,.95,canopyAccess));
         #endif
       `)
+      .replace('#include <alphatest_fragment>',foliageAlphaTestGLSL)
       // Volume normals point out of the canopy, independent of which side of
       // the carrier card the camera sees. Keep normal-map handedness intact.
       .replace('#include <normal_fragment_begin>',THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;','#ifndef CANOPY_VOLUME\nnormal *= faceDirection;\n#endif'))
@@ -377,34 +431,29 @@ export function matteFoliage(material:THREE.MeshStandardMaterial,volume=false){
         #ifdef CANOPY_VOLUME
         // Bound ambient occlusion so shaded leaf colour survives. Sunlight
         // already has shadow-map occlusion and must not be darkened twice.
-        float canopySkyAccess=.58+.42*canopyAccess;
-        reflectedLight.indirectDiffuse*=canopySkyAccess;
-        reflectedLight.indirectSpecular*=canopySkyAccess;
-        // Thin foliage also receives broad sky through its reverse side.
-        // Sample the real scene's sky for a material-coloured illumination
-        // floor, rather than letting downward normals sample only dark ground.
-        vec3 canopySkyIrradiance=getAmbientLightIrradiance(ambientLightColor);
+        float canopySkyAccess=.68+.32*canopyAccess;
+        // Mix irradiance from both sides instead of imposing an upward-sky
+        // brightness floor, which flattened the crown's directional shading.
+        vec3 canopyBackIrradiance=getAmbientLightIrradiance(ambientLightColor);
+        #if defined(USE_LIGHT_PROBES)
+        canopyBackIrradiance+=getLightProbeIrradiance(lightProbe,-geometryNormal);
+        #endif
         #if NUM_HEMI_LIGHTS > 0
         #pragma unroll_loop_start
         for(int i=0;i<NUM_HEMI_LIGHTS;i++){
-          canopySkyIrradiance+=getHemisphereLightIrradiance(hemisphereLights[i],hemisphereLights[i].direction);
+          canopyBackIrradiance+=getHemisphereLightIrradiance(hemisphereLights[i],-geometryNormal);
         }
         #pragma unroll_loop_end
         #endif
         #if defined(USE_ENVMAP) && defined(STANDARD) && defined(ENVMAP_TYPE_CUBE_UV)
-        canopySkyIrradiance+=getIBLIrradiance(normalize((viewMatrix*vec4(0.0,1.0,0.0,0.0)).xyz));
+        canopyBackIrradiance+=getIBLIrradiance(-geometryNormal);
         #endif
-        vec3 canopyFill=canopySkyIrradiance*BRDF_Lambert(material.diffuseColor)*(.5+.15*canopyAccess);
-        reflectedLight.indirectDiffuse=max(reflectedLight.indirectDiffuse,canopyFill);
-        #if NUM_DIR_LIGHTS == 1
-        float canopyRim=pow(1.0-abs(dot(geometryNormal,geometryViewDir)),2.0);
-        float leafBacklight=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.0),3.0);
-        reflectedLight.directDiffuse+=diffuseColor.rgb*directLight.color*(.018*canopyRim*leafBacklight*canopyAccess*canopyAccess);
-        #endif
+        reflectedLight.indirectDiffuse=(reflectedLight.indirectDiffuse*.76+canopyBackIrradiance*BRDF_Lambert(material.diffuseColor)*vec3(.95,1.0,.94)*.24)*canopySkyAccess;
+        reflectedLight.indirectSpecular*=canopySkyAccess;
         #endif
       `);
   };
-  material.customProgramCacheKey=()=>`volume-matte-canopy-v5-${volume}`;return material;
+  material.customProgramCacheKey=()=>`two-sided-volume-canopy-v7-${volume}-${leafNormals}`;return material;
 }
 
 /** Matte painted concrete with inner-edge grime and racing-line tyre deposits. */

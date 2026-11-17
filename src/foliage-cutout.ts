@@ -1,27 +1,44 @@
 import * as THREE from 'three';
 
-const prepared=new WeakMap<THREE.Texture,THREE.DataTexture>();
+const prepared=new WeakMap<THREE.Texture,Map<number,THREE.DataTexture>>();
 const toLinear=Float32Array.from({length:256},(_,i)=>{const v=i/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
 const toSRGB=Uint8Array.from({length:4097},(_,i)=>{const v=i/4096;return Math.round(255*(v<=.0031308?v*12.92:1.055*v**(1/2.4)-.055));});
 
-/** Preserve leaf colour just outside its alpha silhouette. Canvas-backed
+/** Shared by grass and tree leaves. Bound the derivative ramp so empty atlas
+ * texels never acquire coverage when a card is small or viewed edge-on. */
+export const foliageAlphaTestGLSL=`
+  #ifdef USE_ALPHATEST
+  #ifdef ALPHA_TO_COVERAGE
+  float foliageAlpha=diffuseColor.a;
+  float foliageWidth=clamp(fwidth(foliageAlpha),1.0/255.0,min(alphaTest,1.0-alphaTest));
+  diffuseColor.a=smoothstep(alphaTest-foliageWidth*.5,alphaTest+foliageWidth*.5,foliageAlpha);
+  if(foliageAlpha<=0.0||diffuseColor.a<=0.0)discard;
+  #else
+  if(diffuseColor.a<alphaTest)discard;
+  #endif
+  #endif
+`;
+
+/** Preserve leaf colour throughout the transparent atlas background. Canvas-backed
  * textures cannot retain RGB at alpha zero, so upload the final pixels raw. */
 function bleed(pixels:Uint8Array,width:number,height:number){
-  const count=width*height,distance=new Uint8Array(count),queue=new Int32Array(count);distance.fill(255);let head=0,tail=0;
-  for(let i=0;i<count;i++)if(pixels[i*4+3]>=192){distance[i]=0;queue[tail++]=i;}
+  const count=width*height,visited=new Uint8Array(count),queue=new Int32Array(count);let head=0,tail=0;
+  for(let i=0;i<count;i++)if(pixels[i*4+3]>=192){visited[i]=1;queue[tail++]=i;}
   if(!tail){
     let peak=0;for(let i=3;i<pixels.length;i+=4)peak=Math.max(peak,pixels[i]);
     if(!peak)return;
-    for(let i=0;i<count;i++)if(pixels[i*4+3]===peak){distance[i]=0;queue[tail++]=i;}
+    for(let i=0;i<count;i++)if(pixels[i*4+3]===peak){visited[i]=1;queue[tail++]=i;}
   }
   while(head<tail){
-    const index=queue[head++];if(distance[index]>=8)continue;
+    // Fill the entire transparent background, including pale RGB more than
+    // eight pixels from a leaf. Coarse mips can sample that whole region.
+    const index=queue[head++];
     const x=index%width,y=Math.floor(index/width);
     for(let direction=0;direction<4;direction++){
       const nx=x+(direction===0?-1:direction===1?1:0),ny=y+(direction===2?-1:direction===3?1:0);
       if(nx<0||nx>=width||ny<0||ny>=height)continue;
-      const next=ny*width+nx;if(distance[next]!==255)continue;
-      distance[next]=distance[index]+1;queue[tail++]=next;
+      const next=ny*width+nx;if(visited[next])continue;
+      visited[next]=1;queue[tail++]=next;
       pixels[next*4]=pixels[index*4];pixels[next*4+1]=pixels[index*4+1];pixels[next*4+2]=pixels[index*4+2];
     }
   }
@@ -47,7 +64,7 @@ function downsample(source:Uint8Array,width:number,height:number){
  * instances; it adds no texture processing to the driving frame loop. */
 export function foliageCutoutTexture(texture:THREE.Texture,cutoff:number):THREE.Texture{
   if(texture.userData.foliageEdgeBleed)return texture;
-  const cached=prepared.get(texture);if(cached)return cached;
+  const cached=prepared.get(texture)?.get(cutoff);if(cached)return cached;
   const image=texture.image as CanvasImageSource&{width:number;height:number};if(!image?.width||!image.height)return texture;
   const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
   const context=canvas.getContext('2d',{willReadFrequently:true})!;context.drawImage(image,0,0);
@@ -58,11 +75,16 @@ export function foliageCutoutTexture(texture:THREE.Texture,cutoff:number):THREE.
   while(current.width>1||current.height>1){
     const next=downsample(current.data,current.width,current.height),histogram=new Uint32Array(256);
     for(let i=3;i<next.pixels.length;i+=4)histogram[next.pixels[i]]++;
-    const target=Math.ceil(coverage*next.width*next.height);let count=0,quantile=255;
+    const target=Math.round(coverage*next.width*next.height);let count=0,quantile=255;
     while(quantile>0&&count+histogram[quantile]<target){count+=histogram[quantile];quantile--;}
-    const scale=THREE.MathUtils.clamp(threshold/Math.max(quantile,1),.85,1.85);
-    for(let i=3;i<next.pixels.length;i+=4)next.pixels[i]=Math.min(255,Math.round(next.pixels[i]*scale));
-    bleed(next.pixels,next.width,next.height);current={data:next.pixels,width:next.width,height:next.height};levels.push(current);
+    // Do not force even a nearly empty atlas's final 1x1 mip to become opaque.
+    const scale=target>0?THREE.MathUtils.clamp(threshold/Math.max(quantile,1),.85,4):1;
+    // Coverage correction belongs to the uploaded level only. Feeding it
+    // back into filtering progressively inflates low-alpha fringes and holes.
+    current={data:next.pixels,width:next.width,height:next.height};
+    const corrected=new Uint8Array(next.pixels);
+    for(let i=3;i<corrected.length;i+=4)corrected[i]=Math.min(255,Math.round(corrected[i]*scale));
+    bleed(corrected,next.width,next.height);levels.push({data:corrected,width:next.width,height:next.height});
   }
   const result=new THREE.DataTexture(base,image.width,image.height,THREE.RGBAFormat,THREE.UnsignedByteType);
   result.name=`${texture.name}-leaf-edge-padding`;result.colorSpace=texture.colorSpace;result.mapping=texture.mapping;result.channel=texture.channel;
@@ -71,5 +93,5 @@ export function foliageCutoutTexture(texture:THREE.Texture,cutoff:number):THREE.
   result.matrixAutoUpdate=texture.matrixAutoUpdate;result.matrix.copy(texture.matrix);
   result.mipmaps=levels;result.generateMipmaps=false;result.minFilter=THREE.LinearMipmapLinearFilter;result.magFilter=THREE.LinearFilter;
   result.userData={...texture.userData,foliageMipmaps:true,foliageEdgeBleed:true};result.needsUpdate=true;
-  prepared.set(texture,result);return result;
+  const variants=prepared.get(texture)??new Map<number,THREE.DataTexture>();variants.set(cutoff,result);prepared.set(texture,variants);return result;
 }

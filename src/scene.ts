@@ -21,6 +21,7 @@ import {coastalTerrain} from './coastal-terrain';
 import {TreeLOD} from './tree-lod';
 import {TREE_MODELS} from './foliage';
 import {GrassField} from './grass';
+import {DaylightPipeline} from './daylight-pipeline';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -53,10 +54,7 @@ export class GameScene {
   private tyreSmoke=new TyreSmoke();
   private time=0;
   private floor:THREE.Mesh;
-  private sun=new THREE.DirectionalLight(0xfff3df,3.4);
-  private sunCenter=new THREE.Vector3();
-  private shadowCenter=new THREE.Vector3(Infinity,Infinity,Infinity);
-  private shadowExtent=0;
+  private daylight:DaylightPipeline;
   private treeLODs:TreeLOD[]=[];
   private detailLayers:DetailLayer[]=[];
   private grass:GrassField|null=null;
@@ -82,7 +80,7 @@ export class GameScene {
     // opposite the sun. A small neutral fill keeps deep shade from crushing.
     const hemi=new THREE.HemisphereLight(0xd9e8ff,0x8d927c,.65);hemi.name='daylight-sky-and-ground-bounce';
     const ambient=new THREE.AmbientLight(0xe1e8ee,.085);ambient.name='daylight-ambient-fill';this.scene.add(hemi,ambient);
-    const sun=this.sun;sun.name='HDR-aligned-direct-sun';sun.position.set(-500,780,350);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-225,right:225,top:225,bottom:-225,near:1,far:1800});sun.shadow.normalBias=.012;sun.shadow.bias=-.000025;sun.shadow.radius=2;this.scene.add(sun,sun.target);
+    this.daylight=new DaylightPipeline(this.renderer,this.scene,this.camera);
     this.assets=new SceneAssets(this.renderer,this.scene,()=>{this.renderer.shadowMap.needsUpdate=true;});
     this.surfaceDepthMaterial.userData.sharedCC0=true;
     const floorGeometry=new THREE.PlaneGeometry(200000,200000);floorGeometry.setAttribute('color',new THREE.Float32BufferAttribute(new Array(12).fill(1),3));const uv=floorGeometry.getAttribute('uv');for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*100000,uv.getY(i)*100000);
@@ -94,10 +92,11 @@ export class GameScene {
     this.camera.position.set(260,290,340);this.orbit=new OrbitControls(this.camera,this.renderer.domElement);this.orbit.enableDamping=true;this.orbit.dampingFactor=.065;this.orbit.maxPolarAngle=Math.PI/2-.08;this.orbit.minDistance=5;this.orbit.maxDistance=100000;this.orbit.target.set(0,0,-8);
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();
     this.applyVehicleMaterials();
-    void this.assets.ready.then(()=>{this.replaceKartModel();if(this.track){this.clearGroup(this.scenery);this.addScenery();this.addBrakeBoards();}this.shadowCenter.set(Infinity,Infinity,Infinity);this.renderer.shadowMap.needsUpdate=true;});
+    void this.assets.ready.then(()=>{this.replaceKartModel();if(this.track){this.clearGroup(this.scenery);this.addScenery();this.addBrakeBoards();}this.daylight.reset();this.renderer.shadowMap.needsUpdate=true;});
   }
   resize(){const w=this.container.clientWidth,h=this.container.clientHeight;if(w<1||h<1)return;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.track&&this.mode==='orbit')this.frameTrack();}
   setVehicle(){
+    this.daylight.reset();
     this.tyreSmoke.clear();this.slipDuration.fill(0);
     for(const group of [this.kart.root,...this.kart.wheelMeshes]){this.scene.remove(group);this.clearGroup(group);}
     this.kart=this.physics.profile.id==='rb20'?makeRB20():makeKart();this.scene.add(this.kart.root,...this.kart.wheelMeshes);
@@ -145,16 +144,6 @@ export class GameScene {
       this.clearGroup(this.kart.wheelMeshes[i]);this.kart.wheelMeshes[i].scale.setScalar(1);this.kart.wheelMeshes[i].add(wheel);
     }
     this.applyVehicleMaterials();this.renderer.shadowMap.needsUpdate=true;
-  }
-  private updateSun(){
-    const center=this.mode==='orbit'?this.orbit.target:this.kart.root.position;
-    const b=this.track?.bounds,extent=this.mode==='orbit'&&b?Math.min(900,Math.max(90,(b.maxX-b.minX)*.57,(b.maxZ-b.minZ)*.57),Math.max(28,this.camera.position.distanceTo(this.orbit.target)*.85)):48;
-    // Stabilize the shadow texels while following the car.
-    const texel=extent*2/2048;this.sunCenter.set(Math.round(center.x/texel)*texel,Math.round(center.y/texel)*texel,Math.round(center.z/texel)*texel);
-    if(this.shadowCenter.distanceToSquared(this.sunCenter)<texel*texel&&this.shadowExtent===extent)return;
-    this.shadowCenter.copy(this.sunCenter);this.shadowExtent=extent;
-    this.sun.target.position.copy(this.sunCenter);this.sun.position.copy(this.sunCenter).addScaledVector(this.assets.sunDirection,900);
-    const camera=this.sun.shadow.camera;Object.assign(camera,{left:-extent,right:extent,top:extent,bottom:-extent});camera.updateProjectionMatrix();this.renderer.shadowMap.needsUpdate=true;
   }
   private addSurface(mesh:THREE.Mesh,order:number,name:string){
     // A physical depth pass keeps cars, terrain and overpasses occluding the
@@ -224,6 +213,7 @@ export class GameScene {
     const c=document.createElement('canvas');c.width=1024;c.height=192;const ctx=c.getContext('2d')!;ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='italic 900 116px Arial';ctx.fillText(text,c.width/2,c.height*.53);const map=new THREE.CanvasTexture(c);map.colorSpace=THREE.SRGBColorSpace;return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map}));
   }
   setTrack(track:TrackData,_settings:TrackSettings,terrain:TerrainField=new TerrainField(),reframe=true){
+    this.daylight.reset();
     this.tyreSmoke.clear();this.slipDuration.fill(0);
     if(this.water){this.scene.remove(this.water.group);this.water.dispose();}
     const coastal=coastalTerrain(track,terrain);
@@ -343,12 +333,13 @@ export class GameScene {
     this.detailLayers.push(...addGroundContactShadows(this.scenery,this.terrain,trees.map(t=>({x:t.x,z:t.z,radiusX:t.scale*(t.variant===0?.8:.65),radiusZ:t.scale*(t.variant===0?.7:.55),strength:.3,angle:t.x*13.7})),'tree-root-contact-occlusion'));
   }
   frameTrack(){
+    this.daylight.reset();
     if(!this.track)return;const b=this.track.bounds;const center=new THREE.Vector3((b.minX+b.maxX)/2,(this.terrain.min+this.terrain.max)/2,(b.minZ+b.maxZ)/2);
     const size=Math.max(b.maxX-b.minX,(b.maxZ-b.minZ)*1.35);const aspect=Math.max(.4,this.camera.aspect),scale=Math.max(1,1.1/aspect);
     this.orbit.target.copy(center);this.camera.position.copy(center).add(new THREE.Vector3(size*.57*scale,size*.90*scale,size*.94*scale));this.camera.lookAt(center);this.orbit.update();
     const fog=this.scene.fog as THREE.FogExp2,range=this.camera.position.distanceTo(center);fog.density=Math.min(ENVIRONMENT_FOG_DENSITY,1/Math.max(1,range));this.camera.near=Math.max(1,range/2000);this.camera.far=Math.max(1400,range*4);this.camera.updateProjectionMatrix();
   }
-  setCamera(mode:CameraMode){this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.FogExp2;fog.density=ENVIRONMENT_FOG_DENSITY;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
+  setCamera(mode:CameraMode){this.daylight.reset();this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.FogExp2;fog.density=ENVIRONMENT_FOG_DENSITY;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
@@ -421,8 +412,6 @@ export class GameScene {
     for(const layer of this.detailLayers)layer.object.visible=layer.center.distanceToSquared(this.camera.position)<layer.distance*layer.distance;
     this.grass?.update(this.time,this.camera.position);
     this.contactShadow.update(this.physics);
-    this.updateSun();
-    if(running||this.time<2)this.renderer.shadowMap.needsUpdate=true;
-    this.renderer.render(this.scene,this.camera);
+    this.daylight.render(this.time,this.assets.sunDirection,[this.kart.root,...this.kart.wheelMeshes],this.terrain.seaLevel??(this.terrain.min+this.terrain.max)*.5);
   }
 }
