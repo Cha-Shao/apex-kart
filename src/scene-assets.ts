@@ -7,6 +7,7 @@ import {TREE_ASSET_BASE,TREE_MODELS} from './foliage';
 import {treeLodFade} from './tree-lod';
 import {foliageCutoutTexture} from './foliage-cutout';
 import {treeLeafCoverage} from './tree-leaf-coverage';
+import {prepareTreeWind,treeWind} from './tree-wind';
 import {daylightSky} from './daylight';
 import type {TrackData} from './track';
 
@@ -70,6 +71,7 @@ export class SceneAssets {
   readonly kerb:THREE.MeshStandardMaterial;
   readonly roadPaint:THREE.MeshStandardMaterial;
   readonly treeViewPosition=new THREE.Vector3();
+  readonly treeWindTime={value:0};
   private readonly treeMaterials=new Map<string,THREE.Material>();
   private readonly treeDepthMaterials=new Map<string,THREE.MeshDepthMaterial>();
   readonly tyre=tyreMaterial();
@@ -106,7 +108,7 @@ export class SceneAssets {
     for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
     const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
     const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
-      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-coverage-3':groundcover?'?v=blue-noise-foliage-3':''}`);
+      const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-coverage-3':groundcover?'?v=grounded-fine-grass-6':''}`);
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(object=>{
         if(!(object instanceof THREE.Mesh))return;
@@ -122,6 +124,7 @@ export class SceneAssets {
             const leafNormal=object.geometry.getAttribute('_leaf_normal');
             if(leafNormal)object.geometry.setAttribute('leafSurfaceNormal',leafNormal);
             matteFoliage(material,!!occlusion,!!leafNormal);material.alphaToCoverage=foliageMSAA;
+            if(tree){prepareTreeWind(object.geometry);treeWind(material,this.treeWindTime);}
           }
         }
       });
@@ -190,6 +193,7 @@ export class SceneAssets {
   treeDepthMaterial(source:THREE.Material,level:number){
     const key=`${source.uuid}/${level}`;let material=this.treeDepthMaterials.get(key);if(material)return material;
     material=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});material.userData.sharedCC0=true;
+    if(source.userData.treeWind)treeWind(material,this.treeWindTime);
     treeLodFade(material,level,this.treeViewPosition);this.treeDepthMaterials.set(key,material);return material;
   }
   clone(name:string){return this.models.get(name)?.clone(true);}

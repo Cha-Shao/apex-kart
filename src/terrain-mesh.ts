@@ -1,5 +1,8 @@
 import type {Point} from './track';
 import type {TerrainField} from './terrain';
+
+/** Rendered turf sits slightly below the shared physics/heightfield surface. */
+export const TERRAIN_SURFACE_OFFSET=-.025;
 export type TerrainGrid=Pick<TerrainField,'originX'|'originZ'|'cellSize'|'resolution'>;
 const cross=(a:Point,b:Point,p:Point)=>(b.x-a.x)*(p.z-a.z)-(b.z-a.z)*(p.x-a.x);
 /** Clip into the heightfield's actual triangles, not just a denser approximation.

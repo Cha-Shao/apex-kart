@@ -24,7 +24,9 @@ export function meadowSeeds(minX:number,minZ:number,maxX:number,maxZ:number){
   const candidate=(ix:number,iz:number)=>{
     const key=`${ix},${iz}`;let point=candidates.get(key);if(point)return point;
     const x=(ix+vegetationHash(ix,iz,431))*cell,z=(iz+vegetationHash(ix,iz,997))*cell;
-    point={x,z,priority:vegetationHash(ix,iz,1913),radius:1.03+vegetationGrowth(x,z)*.5};candidates.set(key,point);return point;
+    // Separate whole grass families rather than tiling a continuous carpet.
+    // Their short companion lobes can meet while tall cores remain distinct.
+    point={x,z,priority:vegetationHash(ix,iz,1913),radius:1.25+vegetationGrowth(x,z)*.25};candidates.set(key,point);return point;
   };
   for(let iz=Math.floor(minZ/cell);iz<Math.ceil(maxZ/cell);iz++)for(let ix=Math.floor(minX/cell);ix<Math.ceil(maxX/cell);ix++){
     const point=candidate(ix,iz);if(point.x<minX||point.x>=maxX||point.z<minZ||point.z>=maxZ)continue;

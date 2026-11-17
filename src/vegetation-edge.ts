@@ -1,7 +1,9 @@
 import {FootprintIndex,polygonDistance} from './track-footprint';
 import {vegetationGrowth,vegetationNoise} from './vegetation-distribution';
+import {TERRAIN_SURFACE_OFFSET} from './terrain-mesh';
 
 export const VEGETATION_EDGE_REACH=6;
+export const VEGETATION_ROOT_OFFSET=TERRAIN_SURFACE_OFFSET-.006;
 
 /** Distance to the actual union of road, kerbs and runoff, including nearby
  * road sections. A centreline offset would leave hard bands at tight corners. */

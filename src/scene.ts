@@ -10,7 +10,7 @@ import { TyreSmoke } from './tyre-smoke';
 import { TyreMarks } from './tyre-marks';
 import { SceneAssets, surfaceUVs, terrainGrassColor, disposeSceneGroup } from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
-import {drapeTriangles} from './terrain-mesh';
+import {drapeTriangles,TERRAIN_SURFACE_OFFSET} from './terrain-mesh';
 import {tyreGeometry,GRAVEL_TEXTURE_METRES,ASPHALT_TEXTURE_METRES} from './surface-materials';
 import {ContactShadow,addGroundContactShadows} from './contact-shadow';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
@@ -206,7 +206,7 @@ export class GameScene {
     this.clearGroup(this.landscape);const f=this.terrain,n=f.resolution,positions:number[]=[],colors:number[]=[],indices:number[]=[],tint=new THREE.Color();
     // Keep the complete shared heightfield below every paved surface. Water
     // meets the terrain by depth, rather than deleting its supporting ground.
-    for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=terrainGrassColor(wx,wz,h,tint);positions.push(wx,h-.025,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
+    for(let z=0;z<n;z++)for(let x=0;x<n;x++){const h=f.heights[z*n+x],wx=f.originX+x*f.cellSize,wz=f.originZ+z*f.cellSize,color=terrainGrassColor(wx,wz,h,tint);positions.push(wx,h+TERRAIN_SURFACE_OFFSET,wz);colors.push(color.r,color.g,color.b);if(x<n-1&&z<n-1){const a=z*n+x,b=a+1,c=a+n,d=c+1;indices.push(a,c,d,a,d,b);}}
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();surfaceUVs(geo,2);const mesh=new THREE.Mesh(geo,this.assets.grass);mesh.receiveShadow=true;this.landscape.add(mesh);
   }
   private sign(text:string,w:number,h:number,bg='#1c3031',fg='#d1ef70'){
@@ -343,6 +343,7 @@ export class GameScene {
   setColor(color:string){this.kart.paint.color.set(color);}
   update(dt:number,running:boolean){
     this.time+=dt;
+    this.assets.treeWindTime.value=this.time;
     this.water?.update(this.time);
     const body=this.physics.body;this.kart.root.quaternion.copy(body.quaternion as any);this.target.set(0,this.physics.visualOffset,0).applyQuaternion(this.kart.root.quaternion);this.kart.root.position.copy(body.position as any).add(this.target);
     this.kart.steering.rotation.z=this.physics.telemetry.steering*this.physics.profile.steeringRatio;

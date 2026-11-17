@@ -3,8 +3,8 @@ import type {TrackData,Point} from './track';
 import type {TerrainField} from './terrain';
 import {FootprintIndex,polygonDistance} from './track-footprint';
 import type {PlantModel} from './grass';
-import {meadowSeeds,vegetationGrowth} from './vegetation-distribution';
-import {vegetationEdgeDistance,vegetationEdgeWeight} from './vegetation-edge';
+import {meadowSeeds} from './vegetation-distribution';
+import {vegetationEdgeDistance,vegetationEdgeWeight,VEGETATION_ROOT_OFFSET} from './vegetation-edge';
 import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
 
 const CELL=24,LOAD_RADIUS=84,KEEP_RADIUS=112;
@@ -16,7 +16,7 @@ interface Batch {meshes:THREE.InstancedMesh[];center:THREE.Vector3;radius:number
 interface Tile {x:number;z:number;batches:Batch[];edge?:MeadowEdge}
 const seeded=(initial:number)=>{let seed=initial;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};};
 
-/** Deterministic ground cover everywhere on the terrain, kept in a bounded
+/** Deterministic grass families on eligible land, kept in a bounded
  * camera neighbourhood instead of allocating millions of off-screen plants. */
 export class MeadowField extends THREE.Group {
   private readonly tiles=new Map<string,Tile>();
@@ -24,13 +24,13 @@ export class MeadowField extends THREE.Group {
   private viewCell='';
   private cold=true;
   constructor(private track:TrackData,private terrain:TerrainField,private land:LandPlacement,private paved:FootprintIndex,private models:PlantModel[],private material:MaterialFactory){
-    super();this.name='whole-terrain-dense-meadow-tiles';
+    super();this.name='irregular-tall-and-short-grass-clumps';
   }
 
   private build(x:number,z:number,time:number):Tile{
     const random=seeded((Math.imul(x,73856093)^Math.imul(z,19349663)^0x45d9f3b)>>>0),lists=this.models.map(()=>[] as Placement[]),f=this.terrain,b=this.track.bounds;
     const put=(px:number,pz:number,scale:number)=>{
-      const index=Math.floor(random()*this.models.length),model=this.models[index],spread=.8+random()*.4,y=f.sample(px,pz),clearance=(model.radius+.065)*scale*Math.max(1,spread);
+      const index=Math.floor(random()*this.models.length),model=this.models[index],spread=.96+random()*.08,y=f.sample(px,pz),clearance=(model.radius+.065)*scale*Math.max(1,spread);
       if(f.seaLevel!==null&&y<f.seaLevel)return false;
       if(!this.land({x:px,z:pz},clearance))return false;
       // Preserve the same paddock and viewing-stand footprints as the shared
@@ -41,19 +41,14 @@ export class MeadowField extends THREE.Group {
       for(const region of this.paved.query(px-clearance,px+clearance,pz-clearance,pz+clearance))if(polygonDistance(region.points,{x:px,z:pz})<clearance)return false;
       const dx=(f.sample(px+.3,pz)-f.sample(px-.3,pz))/.6,dz=(f.sample(px,pz+.3)-f.sample(px,pz-.3))/.6;
       if(Math.hypot(dx,dz)>1.05)return false;
-      const lush=vegetationGrowth(px,pz),tone=.86+lush*.07+random()*.07;
-      lists[index].push({x:px,y:y-.031,z:pz,scale,spread,stretch:.66+lush*.36+random()*.24,rotation:random()*Math.PI*2,tint:new THREE.Color().setRGB(tone*(.97+random()*.035),tone,tone*(.91+random()*.07))});
+      const tone=.94+random()*.06;
+      lists[index].push({x:px,y:y+VEGETATION_ROOT_OFFSET,z:pz,scale,spread,stretch:scale*(.95+random()*.1),rotation:random()*Math.PI*2,tint:new THREE.Color().setScalar(tone)});
       return true;
     };
     for(const {x:px,z:pz} of meadowSeeds(x*CELL,z*CELL,(x+1)*CELL,(z+1)*CELL)){
-      if(put(px,pz,.83+random()*.38))continue;
-      // Smaller pieces fit verges, islands and shorelines where a whole
-      // meadow patch would overhang pavement or water.
-      const phase=random()*Math.PI*2;
-      for(let k=0;k<8;k++){
-        const angle=phase+k*2.3999632297+(random()-.5)*.6,radius=Math.sqrt((k+random())/8)*1.12;
-        put(px+Math.cos(angle)*radius,pz+Math.sin(angle)*radius,.27+random()*.1);
-      }
+      // Dedicated roadside tufts fill narrow gaps; whole families keep their
+      // authored scale instead of turning into one-third-size copies.
+      put(px,pz,.94+random()*.12);
     }
     const batches:Batch[]=[],dummy=new THREE.Object3D();
     let edge:MeadowEdge|undefined;
@@ -85,8 +80,8 @@ export class MeadowField extends THREE.Group {
         const mesh=new THREE.InstancedMesh(source.geometry,this.material(source.material,model,level,time,edge),placements.length);
         mesh.name=`meadow-tile-${x}-${z}-${index}-${level}`;mesh.position.copy(center);
         placements.forEach((p,i)=>{
-          // Narrow patches must fit between pavement and fence without also
-          // shrinking every leaf vertically into a ground-hugging carpet.
+          // Short families shrink in height as well as footprint. Both grass
+          // sizes retain the same proportions at roads, fences and shores.
           dummy.position.set(p.x-center.x,p.y-center.y,p.z-center.z);dummy.rotation.set(0,p.rotation,0);dummy.scale.set(p.scale,p.stretch,p.scale*p.spread);dummy.updateMatrix();
           mesh.setMatrixAt(i,dummy.matrix);mesh.setColorAt(i,p.tint);
         });

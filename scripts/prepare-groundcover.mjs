@@ -9,10 +9,9 @@ import sharp from 'sharp';
 import * as THREE from 'three';
 import {groundcoverPatches,rgbaPixels} from './groundcover-patches.mjs';
 
-// Real artist-authored leaf meshes/UVs, authored offline; no generator ships.
+// Artist-authored photographic cutouts and small-plant meshes, prepared offline.
 const SOURCES=[
-  {id:'grass_medium_01',variants:[['grass-short-a','grass_medium_01_small_a_LOD0',.17,450,150],['grass-short-b','grass_medium_01_small_b_LOD0',.15,400,140]]},
-  {id:'grass_medium_02',variants:[['grass-tall-a','grass_medium_02_a',.28,440,150],['grass-tall-b','grass_medium_02_c',.31,550,180]]},
+  {id:'grass_medium_01',variants:[]},
   {id:'shrub_sorrel_01',variants:[['weed-a','shrub_sorrel_01_b',.16,350,110],['weed-b','shrub_sorrel_01_a',.18,320,100]]},
   {id:'shrub_02',variants:[['shrub-a','shrub_02_a',1.1,2600,650],['shrub-b','shrub_02_b',.85,2200,600]]},
 ];
@@ -45,10 +44,14 @@ export async function prepareGroundcover({cache='test-results/asset-source/groun
     const metadataFile=path.join(cache,`${id}-files.json`);let metadata;
     try{metadata=JSON.parse(await fs.readFile(metadataFile,'utf8'));}
     catch{metadata=JSON.parse(await download(`https://api.polyhaven.com/files/${id}`));await fs.writeFile(metadataFile,JSON.stringify(metadata,null,2));}
+    if(id==='grass_medium_01'){
+      meadow=await groundcoverPatches({document,buffer,scene,metadata,cache,cached});
+      const record={id,url:`https://polyhaven.com/a/${id}`,license:'CC0-1.0',sourceFiles:meadow.sourceFiles,variants:meadow.grassVariants};
+      records.push(record);console.log(id,record.variants);continue;
+    }
     const descriptor=metadata.gltf['1k'].gltf,resources={},sourceJson=JSON.parse(await cached(path.join(cache,id,'source.gltf'),descriptor));
     for(const [uri,file] of Object.entries(descriptor.include))resources[uri]=await cached(path.join(cache,id,uri),file);
     const source=await io.readJSON({json:sourceJson,resources});
-    if(id==='grass_medium_01')meadow=await groundcoverPatches({document,buffer,scene,metadata,cache,cached,resources});
     const diffuse=resources[`textures/${id}_diff_1k.jpg`],alphaFile=metadata.Alpha['1k'].png;
     const alpha=await cached(path.join(cache,id,'alpha.png'),alphaFile);
     const mask=await sharp(alpha).resize(1024,1024).removeAlpha().toColourspace('b-w').raw().toBuffer();
@@ -92,7 +95,7 @@ export async function prepareGroundcover({cache='test-results/asset-source/groun
   }
   await document.transform(weld(),dedup(),prune());
   const bytes=await io.writeBinary(document);await fs.writeFile(path.join(output,'groundcover.glb'),bytes);
-  await fs.writeFile(path.join(output,'groundcover-manifest.json'),JSON.stringify({license:'CC0-1.0',file:'groundcover.glb',bytes:bytes.length,changes:'Artist-authored meshes and UVs; photographic diffuse plus alpha; two mesh LODs sharing textures; additional dense 2.4m meadow patches made from the original complete-cluster atlas.',sources:records,meadow},null,2)+'\n');
+  await fs.writeFile(path.join(output,'groundcover-manifest.json'),JSON.stringify({license:'CC0-1.0',file:'groundcover.glb',bytes:bytes.length,changes:'Dense elliptical grass tufts and families assembled from individual 4.5-7cm narrow two-face cards. Small rooted photographic tufts replace wide whole-meadow cutouts. Moderate authored height differences, soft irregular edges and partial low-grass companions. Shared anchors and bends across mesh LODs; artist-authored weeds and shrubs retained.',sources:records,meadow},null,2)+'\n');
   await fs.writeFile(path.join(output,'Poly-Haven-LICENSE.txt'),'Groundcover models and textures from Poly Haven.\nLicense: CC0 1.0 Universal (public domain dedication).\nhttps://polyhaven.com/license\nhttps://creativecommons.org/publicdomain/zero/1.0/\nIndividual asset links and source checksums: groundcover-manifest.json\n');
   console.log(`groundcover.glb: ${(bytes.length/1024/1024).toFixed(2)} MiB`);
 }
