@@ -1,0 +1,77 @@
+{
+  "artwork": "User-supplied four sparse grey-olive tufts (AI-generated artwork)",
+  "sourceFile": "grass-tufts-user-original.png",
+  "outputFile": "grass-tufts-cc0.png",
+  "filenameNote": "cc0 is a legacy code-facing filename, not a declaration of the artwork licence",
+  "transforms": "Per-column alpha bounding crop; 4 columns each 256x512, roots moved to ground-contact bottom, tips preserved",
+  "outputDimensions": [
+    1024,
+    512
+  ],
+  "variants": [
+    {
+      "variant": 0,
+      "sourceBBox": [
+        77,
+        229,
+        402,
+        622
+      ],
+      "crop": [
+        65,
+        222,
+        350,
+        402
+      ],
+      "visibleHeightRatio": 0.444
+    },
+    {
+      "variant": 1,
+      "sourceBBox": [
+        476,
+        260,
+        850,
+        622
+      ],
+      "crop": [
+        464,
+        253,
+        399,
+        371
+      ],
+      "visibleHeightRatio": 0.409
+    },
+    {
+      "variant": 2,
+      "sourceBBox": [
+        972,
+        232,
+        1263,
+        622
+      ],
+      "crop": [
+        960,
+        225,
+        316,
+        399
+      ],
+      "visibleHeightRatio": 0.441
+    },
+    {
+      "variant": 3,
+      "sourceBBox": [
+        1388,
+        247,
+        1670,
+        622
+      ],
+      "crop": [
+        1376,
+        240,
+        307,
+        384
+      ],
+      "visibleHeightRatio": 0.424
+    }
+  ]
+}

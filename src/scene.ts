@@ -22,6 +22,7 @@ import {TreeLOD} from './tree-lod';
 import {TREE_MODELS} from './foliage';
 import {GrassField} from './grass';
 import {DaylightPipeline} from './daylight-pipeline';
+import {SceneDebugLayers,type DebugLayer} from './debug-layers';
 
 export type CameraMode='orbit'|'chase'|'top'|'cockpit';
 const material=(color:number,roughness=.9)=>new THREE.MeshStandardMaterial({color,roughness});
@@ -58,6 +59,9 @@ export class GameScene {
   private treeLODs:TreeLOD[]=[];
   private detailLayers:DetailLayer[]=[];
   private grass:GrassField|null=null;
+  private grassDebugColorsEnabled=false;
+  private readonly debugLayers=new SceneDebugLayers();
+  private readonly debugOverlayScene=new THREE.Scene();
   private contactShadow=new ContactShadow();
   private surfaceDepthMaterial=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true});
   private startLightMaterials:THREE.MeshStandardMaterial[]=[];
@@ -86,6 +90,9 @@ export class GameScene {
     const floorGeometry=new THREE.PlaneGeometry(200000,200000);floorGeometry.setAttribute('color',new THREE.Float32BufferAttribute(new Array(12).fill(1),3));const uv=floorGeometry.getAttribute('uv');for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*100000,uv.getY(i)*100000);
     const floor=new THREE.Mesh(floorGeometry,this.assets.grass);floor.rotation.x=-Math.PI/2;floor.position.y=-70.055;floor.receiveShadow=true;this.scene.add(floor);this.floor=floor;
     this.scene.add(this.landscape,this.circuit,this.scenery,this.kart.root,...this.kart.wheelMeshes);
+    // Debug paths are rendered AFTER HDR/TAA, directly to the final canvas;
+    // rendering inside the HDR/MRT scene could hide plain line shaders.
+    this.debugOverlayScene.add(this.debugLayers);
     this.tyreMarks=new TyreMarks(Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));this.scene.add(this.tyreMarks.mesh);
     this.scene.add(this.tyreSmoke.mesh);
     this.scene.add(this.contactShadow.mesh);
@@ -218,7 +225,7 @@ export class GameScene {
     if(this.water){this.scene.remove(this.water.group);this.water.dispose();}
     const coastal=coastalTerrain(track,terrain);
     this.track=track;this.terrain=coastal.field.clone();this.water=TerrainWater.forTerrain(this.terrain,coastal.quays,this.assets);if(this.water)this.scene.add(this.water.group);
-    this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.startLightMaterials=[];const rendered=surfaceTrack(track);
+    this.makeLandscape();this.clearGroup(this.circuit);this.clearGroup(this.scenery);this.debugLayers.setTrack(track,this.terrain);this.startLightMaterials=[];const rendered=surfaceTrack(track);
     this.assets.setRoadWear(track);
     this.floor.position.y=this.terrain.min-50.055;
     const half=track.width/2;
@@ -329,7 +336,8 @@ export class GameScene {
       const prop=this.assets.clone(name);if(!prop)continue;prop.name=`CC0 ${name}`;prop.position.set(x,this.terrain.sample(x,z)+.035,z);prop.scale.setScalar(scale);prop.rotation.y=name==='truck'?Math.PI/2:Math.PI;this.scenery.add(prop);
     }
     this.detailLayers=addTrackEnvironment(this.scenery,this.track,this.terrain,this.assets,shrubs,land);
-    this.grass=new GrassField(this.track,this.terrain,shrubs,land,this.assets.models.get('groundcover'));this.scenery.add(this.grass);
+    this.grass=new GrassField(this.track,this.terrain,shrubs,land,this.assets.models.get('groundcover'));
+    this.grass.setDebugColors(this.grassDebugColorsEnabled);this.scenery.add(this.grass);
     this.detailLayers.push(...addGroundContactShadows(this.scenery,this.terrain,trees.map(t=>({x:t.x,z:t.z,radiusX:t.scale*(t.variant===0?.8:.65),radiusZ:t.scale*(t.variant===0?.7:.55),strength:.3,angle:t.x*13.7})),'tree-root-contact-occlusion'));
   }
   frameTrack(){
@@ -341,6 +349,11 @@ export class GameScene {
   }
   setCamera(mode:CameraMode){this.daylight.reset();this.mode=mode;this.kart.head.visible=mode!=='cockpit';document.body.classList.toggle('cockpit-view',mode==='cockpit');this.camera.near=mode==='cockpit'?.025:1;this.camera.fov=45;this.camera.updateProjectionMatrix();this.orbit.enabled=mode==='orbit';if(mode==='orbit')this.frameTrack();else{const fog=this.scene.fog as THREE.FogExp2;fog.density=ENVIRONMENT_FOG_DENSITY;if(mode==='chase'){const b=this.physics.body,p=new THREE.Vector3(b.position.x,b.position.y+this.physics.visualOffset,b.position.z),q=new THREE.Quaternion(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);this.camera.position.copy(new THREE.Vector3().fromArray(this.physics.profile.chase).applyQuaternion(q).add(p));this.camera.lookAt(new THREE.Vector3(0,.7,-4.5).applyQuaternion(q).add(p));}}}
   setColor(color:string){this.kart.paint.color.set(color);}
+  setDebugLayer(layer:DebugLayer,visible:boolean){this.debugLayers.setLayer(layer,visible);}
+  setGrassDebugColors(enabled:boolean){
+    this.grassDebugColorsEnabled=enabled;this.grass?.setDebugColors(enabled);
+  }
+  getDebugBufferPathCounts(){return this.debugLayers.getBufferPathCounts();}
   update(dt:number,running:boolean){
     this.time+=dt;
     this.assets.treeWindTime.value=this.time;
@@ -412,7 +425,16 @@ export class GameScene {
     this.scene.updateMatrixWorld();for(const lod of this.treeLODs){const changed=lod.update(this.camera.position),distance=lod.position.distanceTo(this.camera.position);lod.visible=this.mode==='orbit'||distance<1000;if(lod.visible&&(changed||treeViewMoved&&lod.transitioning))this.renderer.shadowMap.needsUpdate=true;}
     for(const layer of this.detailLayers)layer.object.visible=layer.center.distanceToSquared(this.camera.position)<layer.distance*layer.distance;
     this.grass?.update(this.time,this.camera.position);
+    this.debugLayers.update(this.mode==='orbit'?this.orbit.target:this.camera.position);
     this.contactShadow.update(this.physics);
     this.daylight.render(this.time,this.assets.sunDirection,[this.kart.root,...this.kart.wheelMeshes],this.terrain.seaLevel??(this.terrain.min+this.terrain.max)*.5);
+    if(this.debugLayers.isVisible()){
+      // Overlay without replacing the rendered game or relying on MRT/TAA.
+      // Clear depth only so an enabled debug path is always readable.
+      const autoClear=this.renderer.autoClear;
+      this.renderer.setRenderTarget(null);this.renderer.autoClear=false;
+      this.renderer.clearDepth();this.renderer.render(this.debugOverlayScene,this.camera);
+      this.renderer.autoClear=autoClear;
+    }
   }
 }

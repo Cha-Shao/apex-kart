@@ -6,6 +6,19 @@ const ease=(value:number)=>{const t=clamp(value,0,1);return t*t*t*(10+t*(-15+6*t
 // One generator for both materials: 1 is the baseline recovery envelope.
 const RUNOFF_AGGRESSIVENESS={asphalt:1,gravel:4.2} as const;
 
+/** Source-of-truth diagnostics captured DURING the recovery-score algorithm.
+ * This is an energy/proxy score along the circuit, NOT an integrated car
+ * trajectory. No separate debug approximation of speed/turn logic. */
+export interface RunoffScoreSample {
+  x:number;z:number;speedSquared:number;cornerLimitSquared:number;
+  demand:number;turn:number;severity:number;recoveryOffset:number;
+}
+export interface RunoffScoreTrace {samples:RunoffScoreSample[];step:number;}
+const scoreTraces=new WeakMap<RacingLineTrack['features'],RunoffScoreTrace>();
+export function runoffScoreTrace(track:RacingLineTrack):RunoffScoreTrace|null{
+  return scoreTraces.get(track.features)??null;
+}
+
 /** Squared speed is the approach score: acceleration adds 2*a*distance on
  * straights and fast bends; a corner spends it at a finite braking rate.
  * Unlike the normal driving profile, this never brakes for a future corner. */
@@ -44,6 +57,7 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
   const cornerLimits=samples.map(s=>Math.min(topSpeed**2,lateral/Math.max(.0005,Math.abs(s.curvature))));
   const approach=approachSpeeds(cornerLimits,step,acceleration,braking);
   const left=new Array<number>(n).fill(0),right=new Array<number>(n).fill(0);
+  const scoredSeverity=new Array<number>(n).fill(0);
   const turns=samples.map(s=>Math.abs(s.curvature)>features.threshold*.65?Math.sign(s.curvature):0);
   // Tiny heading jitters must not split one recovery path into separate lobes.
   for(let start=0;start<n;start++)if(turns[start]&&turns[start]!==turns[wrap(start-1)]){
@@ -86,6 +100,7 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
     }
     const severity=ease((total-.25)/.9)*ease((peakDemand-.45)/.7);
     if(severity<.03)continue;
+    for(let k=0;k<count;k++)scoredSeverity[wrap(start+k)]=Math.max(scoredSeverity[wrap(start+k)],severity);
     // Inherited energy sets one scale for the whole bend. Never take the
     // farthest of independent traces: that makes lobes and pinched joins.
     const reserve=Math.max(0,entrySquared-safeSquared)/(2*braking);
@@ -119,4 +134,19 @@ export function applyRunoffProfile(track:RacingLineTrack,kerbWidth:number){
   for(let i=0;i<n;i++){
     const a=features.gravelLeft[i],b=features.gravelRight[i];features.runoffWidth[i]=Math.max(a,b);features.outer[i]=a>b?1:b>a?-1:0;
   }
+  // Preserve the actual score propagation and post-score recovery widths for
+  // the optional overlay. Debug renderer must never reconstruct score logic
+  // from the finished runoff mesh.
+  scoreTraces.set(features,{
+    step,samples:samples.map((p,i)=>{
+      const speedSquared=approach[i]*approach[i];
+      const turn=turns[i],side=turn?-turn:0;
+      return {
+        x:p.x,z:p.z,speedSquared,cornerLimitSquared:cornerLimits[i],
+        demand:speedSquared/Math.max(.001,cornerLimits[i]),turn,
+        severity:scoredSeverity[i],
+        recoveryOffset:side>0?left[i]:side<0?right[i]:0,
+      };
+    })
+  });
 }

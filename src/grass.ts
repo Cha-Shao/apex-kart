@@ -5,6 +5,7 @@ import {FootprintIndex,polygonDistance} from './track-footprint';
 import {surfaceTrack} from './surface-track';
 import type {TerrainField} from './terrain';
 import {MeadowField} from './meadow';
+import {GRASS_BLADE_KINDS,makeGrassBlade,type GrassBladeKind} from './grass-blade';
 import {vegetationGrowth} from './vegetation-distribution';
 import {vegetationEdgeWeight,VEGETATION_EDGE_REACH,VEGETATION_ROOT_OFFSET} from './vegetation-edge';
 import {vegetationPaletteGLSL,grassPaletteGLSL} from './vegetation-palette';
@@ -12,7 +13,7 @@ import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
 import {pavementPerimeter} from './guardrail-layout';
 
 const CELL_SIZE=24,WIND_REACH=.065;
-const GRASS=['grass-short-a','grass-short-b','grass-tall-a','grass-tall-b'] as const;
+const GRASS=GRASS_BLADE_KINDS;
 const WEEDS=['weed-a','weed-b'] as const,SHRUBS=['shrub-a','shrub-b'] as const;
 type PlantKind=typeof GRASS[number]|typeof WEEDS[number]|typeof SHRUBS[number];
 type LandPlacement=(p:Point,margin?:number)=>boolean;
@@ -21,24 +22,29 @@ export interface PlantModel {kind:PlantKind;near:THREE.Mesh;far:THREE.Mesh;radiu
 
 function seeded(initial:number){let seed=initial;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};}
 
-/** Bent grass cards and artist-authored small plants, with shared CC0 atlases. */
+/** Procedural two-segment textured grass tufts plus CC0 weeds and shrubs. */
 export class GrassField extends THREE.Group {
   private readonly time={value:0};
   private readonly view={value:new THREE.Vector3()};
+  private readonly debugGrassColors={value:0};
   private readonly terrainHeights={value:null as THREE.DataTexture|null};
   private readonly terrainGrid={value:new THREE.Vector4()};
   private meadow:MeadowField|null=null;
+  private readonly bladeSources:THREE.Mesh[]=[];
   private readonly cells:{meshes:THREE.InstancedMesh[];center:THREE.Vector3;radius:number;model:PlantModel}[]=[];
 
   constructor(track:TrackData,terrain:TerrainField,woodland:readonly Point[],land:LandPlacement,source?:THREE.Group){
-    super();this.name='photographic-grass-weeds-and-shrubs';
-    // Local GLB loading is followed by the normal scenery rebuild. Do not
-    // substitute the old untextured ribbons while the real plants load.
-    if(!source)return;
+    super();this.name='textured-grass-tufts-weeds-and-shrubs';
+    // Each grass instance is one textured tuft on one two-segment plane.
+    // Upright grass loads the four separate grass_0..3 PNGs directly,
+    // preserving their dark luminance detail under olive Shader tint.
+    // The unrelated weeds and shrubs still use the existing imported assets.
     const models=new Map<PlantKind,PlantModel>();
     for(const kind of [...GRASS,...WEEDS,...SHRUBS]){
-      const near=source.getObjectByName(`${kind}-near`),far=source.getObjectByName(`${kind}-far`);
+      const blades=kind.startsWith('grass')?makeGrassBlade(kind as GrassBladeKind):null;
+      const near=blades?.near??source?.getObjectByName(`${kind}-near`),far=blades?.far??source?.getObjectByName(`${kind}-far`);
       if(!(near instanceof THREE.Mesh)||!(far instanceof THREE.Mesh))continue;
+      if(blades)this.bladeSources.push(near,far);
       let radius=0,height=0;
       for(const mesh of [near,far]){
         const geometry=mesh.geometry;
@@ -67,7 +73,7 @@ export class GrassField extends THREE.Group {
     const fenceField=pavementPerimeter(track).field;
     const fencedLand:LandPlacement=(p,margin=0)=>land(p,margin)&&fenceField.sample(p)+margin<=0;
     const meadowModels=GRASS.map(kind=>models.get(kind)).filter((model):model is PlantModel=>!!model)
-      .map(model=>({...model,lodStart:8,lodEnd:16,fadeStart:44,fadeEnd:68}));
+      .map(model=>({...model,lodStart:7,lodEnd:13,fadeStart:32,fadeEnd:49}));
     if([...models.values()].some(model=>model.grass)){
       const texture=new THREE.DataTexture(terrain.heights,terrain.resolution,terrain.resolution,THREE.RedFormat,THREE.FloatType);
       texture.name='meadow-shared-terrain-heights';texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;texture.needsUpdate=true;
@@ -107,16 +113,6 @@ export class GrassField extends THREE.Group {
       cell.push({x,y:y+(model.grass?VEGETATION_ROOT_OFFSET:-.031),z,scale,stretch,rotation:random()*Math.PI*2,slopeX:dx,slopeZ:dz,tint});
       cells.set(cellKey,cell);placements.set(kind,cells);return true;
     };
-    const grassClump=(x:number,z:number,scale:number,stretch:number,tall:boolean)=>{
-      if(!plant(GRASS[(tall?2:0)+Math.floor(random()*2)],x,z,scale,stretch)||!tall)return;
-      // Each model is already a dense tuft of narrow cards. Add a few low
-      // tufts on one side without scaling them down into tiny satellites.
-      const phase=random()*Math.PI*2,lobes=1+Math.floor(random()*3),arc=.7+random()*.4;
-      for(let lobe=0;lobe<lobes;lobe++){
-        const angle=phase+lobe*arc,radius=(.26+random()*.12)*scale,cx=x+Math.cos(angle)*radius,cz=z+Math.sin(angle)*radius;
-        plant(GRASS[Math.floor(random()*2)],cx,cz,.94+random()*.12,.95+random()*.1);
-      }
-    };
     const edge=(i:number,side:number)=>dense.width*.5+curbWidth(dense.width)*(side>0?dense.features.left:dense.features.right)[i]+(side>0?dense.features.gravelLeft:dense.features.gravelRight)[i];
 
     // The streamed field owns grass. Add sparse broadleaf weeds to the verge.
@@ -138,20 +134,6 @@ export class GrassField extends THREE.Group {
         }
       }
     }
-    // Fine, short growth against exposed kerbs keeps the transition attached
-    // to the turf. Radius-based exclusions protect asphalt and white lines.
-    const seams=Math.min(3200,Math.ceil(track.length/.9));
-    for(let k=0;k<seams;k++){
-      const u=(k+random())/seams*n,i=Math.floor(u),j=(i+1)%n,t=u-i,a=dense.samples[i],b=dense.samples[j];
-      if(bridgeHeight(dense,i)>.02||bridgeHeight(dense,j)>.02)continue;
-      for(const side of [-1,1]){
-        const roadEdge=edge(i,side)+(edge(j,side)-edge(i,side))*t,nx=a.nx+(b.nx-a.nx)*t,nz=a.nz+(b.nz-a.nz)*t;
-        if(random()>.78)continue;
-        const outside=.06+random()*.25,offset=(roadEdge+outside)*side,along=(random()-.5)*.8;
-        const px=a.x+(b.x-a.x)*t+nx*offset+a.tx*along,pz=a.z+(b.z-a.z)*t+nz*offset+a.tz*along;
-        plant(GRASS[Math.floor(random()*2)],px,pz,.96+random()*.08,.9+random()*.08,true);
-      }
-    }
     // Real small shrubs replace the former scaled-down ash tree crowns.
     // Their skirts mix low leaves and grass, leaving open ground between
     // woodland patches rather than densely planting the entire heightfield.
@@ -160,7 +142,8 @@ export class GrassField extends THREE.Group {
       for(let k=0;k<4;k++){
         const angle=random()*Math.PI*2,radius=.35+Math.sqrt(random())*1.4,px=shrub.x+Math.cos(angle)*radius,pz=shrub.z+Math.sin(angle)*radius;
         if(random()<.28)plant(WEEDS[Math.floor(random()*2)],px,pz,.95+random()*.4,.8+random()*.35);
-        else grassClump(px,pz,.94+random()*.12,.95+random()*.1,random()<.6);
+        // Grass is sampled by the same continuous density field everywhere,
+        // including near shrubs; never generate a second ring of clumps.
       }
     }
 
@@ -188,6 +171,8 @@ export class GrassField extends THREE.Group {
     }
   }
 
+  setDebugColors(enabled:boolean){this.debugGrassColors.value=enabled?1:0;}
+
   private plantMaterial(source:THREE.Material|THREE.Material[],model:PlantModel,level:number,birth=-1000){
     const original=Array.isArray(source)?source[0]:source;
     const material=(original as THREE.MeshStandardMaterial).clone();material.userData.sharedCC0=false;
@@ -200,6 +185,7 @@ export class GrassField extends THREE.Group {
       shader.uniforms.plantBirth={value:birth};
       if(model.grass){
         shader.uniforms.plantTerrain=this.terrainHeights;shader.uniforms.plantTerrainGrid=this.terrainGrid;
+        shader.uniforms.plantGrassDebug=this.debugGrassColors;
       }
       shader.vertexShader=shader.vertexShader
         .replace('#include <common>',`#include <common>
@@ -253,7 +239,7 @@ export class GrassField extends THREE.Group {
           #endif
         `);
       shader.fragmentShader=shader.fragmentShader
-        .replace('#include <common>',`#include <common>\n${model.grass?grassPaletteGLSL:vegetationPaletteGLSL}\nvarying float vPlantHeight;varying float vPlantDistance;varying float vPlantJitter;varying float vPlantReady;varying vec2 vPlantGround;`)
+        .replace('#include <common>',`#include <common>\n${model.grass?grassPaletteGLSL+'\nuniform float plantGrassDebug;':vegetationPaletteGLSL}\nvarying float vPlantHeight;varying float vPlantDistance;varying float vPlantJitter;varying float vPlantReady;varying vec2 vPlantGround;`)
         .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
           ${model.grass?`
           // All grass faces, including their backs, share one sky-facing
@@ -276,11 +262,20 @@ export class GrassField extends THREE.Group {
           #undef RE_Direct
           #define RE_Direct RE_Direct_Plant
         `)
-        .replace('#include <color_fragment>',`#include <color_fragment>\ndiffuseColor.rgb=${model.grass?'grassAlbedo(diffuseColor.rgb,vPlantGround,.101)':'vegetationAlbedo(diffuseColor.rgb,.94)'};`)
+        .replace('#include <color_fragment>',`#include <color_fragment>\n${model.grass?`
+          // Stable per TUFT (not per fragment): plant root is shared by all
+          // six vertices, and remains identical through LOD and tile rebuilds.
+          float grassSeed=fract(sin(dot(floor(vPlantGround*256.0),vec2(127.1,311.7)))*43758.5453);
+          vec3 grassDebugTint=.23+.77*(.5+.5*cos(6.2831853*(grassSeed+vec3(0.0,.333333,.666667))));
+          // The PNG supplies per-leaf darkness; the shader supplies the
+          // olive-green hue. No solid-colour fill or grayscale flattening.
+          diffuseColor.rgb=mix(grassTextureAlbedo(diffuseColor.rgb,vPlantGround),grassDebugTint,plantGrassDebug);
+        `:'diffuseColor.rgb=vegetationAlbedo(diffuseColor.rgb,.94);'}`)
         .replace('#include <alphatest_fragment>',`${foliageAlphaTestGLSL}
           float plantNear=1.0-smoothstep(${model.lodStart.toFixed(1)},${model.lodEnd.toFixed(1)},vPlantDistance);
           float plantFade=1.0-smoothstep(${model.fadeStart.toFixed(1)}-vPlantJitter,${model.fadeEnd.toFixed(1)}-vPlantJitter,vPlantDistance);
           float plantNoise=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(.06711056,.00583715))));
+          ${model.grass?'// Keep grass cutout cards from filling the camera when viewed at ground level.\n          if(plantNoise>smoothstep(.12,.55,vPlantDistance))discard;':''}
           ${level===0?'if(plantNoise>=plantNear)discard;':'if(plantNoise<plantNear||plantNoise>=plantFade)discard;'}
           if(fract(plantNoise+.381966)>vPlantReady)discard;
         `)
@@ -308,7 +303,7 @@ export class GrassField extends THREE.Group {
           reflectedLight.indirectDiffuse*=mix(.96,1.0,vPlantHeight);
         `);
     };
-    material.customProgramCacheKey=()=>`connected-colony-grass-v13-${model.grass}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
+    material.customProgramCacheKey=()=>`direct-grass0-3-tint-v6-${model.grass}-${level}-${model.lodStart}-${model.lodEnd}-${model.fadeStart}-${model.fadeEnd}`;return material;
   }
 
   update(time:number,view:THREE.Vector3){
@@ -321,5 +316,10 @@ export class GrassField extends THREE.Group {
     }
   }
 
-  dispose(){this.meadow?.dispose();this.terrainHeights.value?.dispose();this.terrainHeights.value=null;}
+  dispose(){
+    this.meadow?.dispose();this.terrainHeights.value?.dispose();this.terrainHeights.value=null;
+    const materials=new Set<THREE.Material>();
+    for(const blade of this.bladeSources){blade.geometry.dispose();for(const material of Array.isArray(blade.material)?blade.material:[blade.material])materials.add(material);}
+    materials.forEach(material=>material.dispose());this.bladeSources.length=0;
+  }
 }

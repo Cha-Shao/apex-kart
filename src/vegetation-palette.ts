@@ -13,9 +13,9 @@ vec3 vegetationAlbedo(vec3 source,float gain){
 }
 `;
 
-/** Turf and upright grass share one linear-light palette and world-space
- * colour field. Source luminance supplies detail, without retaining the
- * photographed grass atlas's bright straw-yellow stems. */
+/** Turf and textured grass share a linear-light grey-olive palette.
+ * Grass tufts use the original grass_0..3 images as dark luminance masks;
+ * their leaf-to-leaf value differences remain visible after tinting. */
 export const grassPaletteGLSL=`
 float grassPaletteNoise(vec2 world){
   vec2 cell=floor(world),t=fract(world);t=t*t*(3.0-2.0*t);
@@ -27,7 +27,18 @@ vec3 grassAlbedo(vec3 source,vec2 world,float sourceLuminance){
   float luminance=dot(source,vec3(.2126,.7152,.0722));
   float detail=clamp(1.0+(luminance/sourceLuminance-1.0)*.55,.65,1.3);
   float grassTone=grassPaletteNoise(world*.045+vec2(19.3,-7.1))*.7+grassPaletteNoise(world*.12+vec2(-3.9,31.7))*.3;
-  vec3 green=mix(vec3(.046,.064,.035),vec3(.05,.067,.039),grassTone);
+  // Muted grey-olive green, centred on sRGB #4A5641 (in linear light).
+  vec3 green=mix(vec3(.062,.085,.048),vec3(.073,.097,.058),grassTone);
   return green*detail;
+}
+// The original grass_N PNG is deliberately treated as a DARK VALUE MAP.
+// Keep its actual luminance variation, then apply the same muted olive hue.
+// Reference value ~0.105 linear matches the ~93 sRGB source grass pixels.
+vec3 grassTextureAlbedo(vec3 source,vec2 world){
+  float luminance=dot(source,vec3(.2126,.7152,.0722));
+  float brightness=clamp(luminance/.105,.24,1.75);
+  float grassTone=grassPaletteNoise(world*.045+vec2(19.3,-7.1))*.7+grassPaletteNoise(world*.12+vec2(-3.9,31.7))*.3;
+  vec3 green=mix(vec3(.062,.085,.048),vec3(.073,.097,.058),grassTone);
+  return green*brightness;
 }
 `;

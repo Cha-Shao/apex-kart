@@ -3,7 +3,9 @@ import {vegetationGrowth,vegetationNoise} from './vegetation-distribution';
 import {TERRAIN_SURFACE_OFFSET} from './terrain-mesh';
 
 export const VEGETATION_EDGE_REACH=6;
-export const VEGETATION_ROOT_OFFSET=TERRAIN_SURFACE_OFFSET-.006;
+// A few millimetres of burial hide the flat alpha-card root on slopes.
+// The old atlas's 30% transparent bottom margin has been cropped separately.
+export const VEGETATION_ROOT_OFFSET=TERRAIN_SURFACE_OFFSET-.014;
 
 /** Distance to the actual union of road, kerbs and runoff, including nearby
  * road sections. A centreline offset would leave hard bands at tight corners. */
