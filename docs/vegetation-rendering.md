@@ -14,6 +14,10 @@
 
 注意“基础密度翻倍”指独立候选草撮数量提升两倍；实际留存数量由同一噪声场和遮挡排除决定。由于草撮形状没有变化，尽量用更多小草撮填补稀疏间隙，而不是堆高旧草团模型。需要实际画面与帧率验收。
 
+## 围栏根部草地覆盖
+
+`src/grass.ts` 的 `fencedLand` 原先用 `fenceField.sample(p)+margin<=0`，会在围栏内侧额外留下一整个草撮半径的空带。现在沿用 `guardrail-layout.ts` 的 `GUARDRAIL_PROFILE.fenceOffset`（0.23m）作为种植边界，草根允许生长到实际铁丝网下方。地形/水域边界依旧保留 `land(p,margin)` 安全距离，路面、路肩及缓冲区仍由 `MeadowField` 的真实铺装 footprint 以草撮半径排除，因此不会因为这次改动长到沥青上。没有添加额外草簇或修改密度噪声。
+
 ## Debug：草撮随机染色
 
 Sidebar「Debug 显示层」新增「草撮随机染色」。`src/grass.ts` 的草材质加入 `plantGrassDebug` uniform：开启时按每个草撮**根部世界坐标**生成稳定高对比的随机 RGB。一个草撮里的两段网格使用完全相同的调试颜色，能分辨覆盖、重叠、LOD、贴地问题。

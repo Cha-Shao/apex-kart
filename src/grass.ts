@@ -10,7 +10,7 @@ import {vegetationGrowth} from './vegetation-distribution';
 import {vegetationEdgeWeight,VEGETATION_EDGE_REACH,VEGETATION_ROOT_OFFSET} from './vegetation-edge';
 import {vegetationPaletteGLSL,grassPaletteGLSL} from './vegetation-palette';
 import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
-import {pavementPerimeter} from './guardrail-layout';
+import {GUARDRAIL_PROFILE,pavementPerimeter} from './guardrail-layout';
 
 const CELL_SIZE=24,WIND_REACH=.065;
 const GRASS=GRASS_BLADE_KINDS;
@@ -71,7 +71,12 @@ export class GrassField extends THREE.Group {
     // The same padded pavement union places both inner and outer fences.
     // Its holes are outside the inner fence, not additional planting areas.
     const fenceField=pavementPerimeter(track).field;
-    const fencedLand:LandPlacement=(p,margin=0)=>land(p,margin)&&fenceField.sample(p)+margin<=0;
+    // Fence mesh is GUARDRAIL_PROFILE.fenceOffset outside the perimeter
+    // contour. Let grass roots reach UNDER that mesh instead of reserving
+    // an extra plant-radius gap inside the fence; only the paved footprint
+    // still uses blade clearance. Keep terrain/water margins unchanged.
+    const fencedLand:LandPlacement=(p,margin=0)=>
+      land(p,margin)&&fenceField.sample(p)<=GUARDRAIL_PROFILE.fenceOffset;
     const meadowModels=GRASS.map(kind=>models.get(kind)).filter((model):model is PlantModel=>!!model)
       .map(model=>({...model,lodStart:7,lodEnd:13,fadeStart:32,fadeEnd:49}));
     if([...models.values()].some(model=>model.grass)){

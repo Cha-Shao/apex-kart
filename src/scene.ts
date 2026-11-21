@@ -284,14 +284,16 @@ export class GameScene {
     const {trees,shrubs}=vegetationLayout(this.track,land);
     const dummy=new THREE.Object3D();
     const treeModels=TREE_MODELS;
-    if(treeModels.every(name=>['','-mid','-far'].every(suffix=>this.assets.models.has(`${name}${suffix}`)))){
+    if(treeModels.every(name=>['','-far'].every(suffix=>this.assets.models.has(`${name}${suffix}`)))){
       for(let variant=0;variant<treeModels.length;variant++){
         const subset=trees.filter(t=>t.variant===variant),cells=new Map<string,typeof trees>();
         for(const tree of subset){const key=`${Math.floor(tree.x/32)},${Math.floor(tree.z/32)}`;const cell=cells.get(key)??[];cell.push(tree);cells.set(key,cell);}
         for(const cell of cells.values()){
         const cx=cell.reduce((sum,t)=>sum+t.x,0)/cell.length,cz=cell.reduce((sum,t)=>sum+t.z,0)/cell.length,cy=this.terrain.sample(cx,cz);
         const radius=Math.max(...cell.map(t=>Math.hypot(t.x-cx,this.terrain.sample(t.x,t.z)-cy-.04,t.z-cz))),lod=new TreeLOD(radius);lod.position.set(cx,cy,cz);this.treeLODs.push(lod);this.scenery.add(lod);
-        for(const [level,suffix] of ['','-mid','-far'].entries()){
+        // The original -far low-poly GLB is promoted to MID. The old -mid
+        // is no longer used. FAR is a real two-plane high-poly-baked atlas.
+        for(const [level,suffix] of ['','-far'].entries()){
         const model=this.assets.models.get(`${treeModels[variant]}${suffix}`)!,batch=lod.levels[level];model.updateMatrixWorld(true);
         model.traverse(source=>{
           if(!(source instanceof THREE.Mesh))return;
@@ -301,6 +303,22 @@ export class GameScene {
           instances.castShadow=true;instances.receiveShadow=true;instances.computeBoundingSphere();batch.add(instances);
         });
         }
+        // Fixed crossed X/Z card pair, 4 triangles total per tree, baked
+        // from the full-resolution model's +Z/+X orthographic views.
+        const card=this.assets.treeBillboard(treeModels[variant]);
+        const billboard=new THREE.InstancedMesh(card.geometry,card.materials,cell.length);
+        billboard.name=`CC0 ${treeModels[variant]} high-model-baked crossed far`;
+        cell.forEach((t,i)=>{
+          const scale=t.scale;
+          dummy.position.set(t.x-cx,this.terrain.sample(t.x,t.z)-lod.position.y-.04,t.z-cz);
+          dummy.rotation.set(0,t.x*13.7,0);
+          dummy.scale.set(scale,scale*t.stretch,scale);dummy.updateMatrix();
+          billboard.setMatrixAt(i,dummy.matrix);
+          const tint=new THREE.Color().setHSL(.23+(Math.sin(t.x*.71+t.z)*.5+.5)*.035,.12,.86+(Math.sin(t.z*.37)*.5+.5)*.1);
+          billboard.setColorAt(i,tint);
+        });
+        billboard.castShadow=false;billboard.receiveShadow=false;
+        billboard.computeBoundingSphere();lod.levels[2].add(billboard);
         }
       }
     }else{
@@ -353,6 +371,7 @@ export class GameScene {
   setGrassDebugColors(enabled:boolean){
     this.grassDebugColorsEnabled=enabled;this.grass?.setDebugColors(enabled);
   }
+  setTreeLodDebugColors(enabled:boolean){this.assets.setTreeLodDebugColors(enabled);}
   getDebugBufferPathCounts(){return this.debugLayers.getBufferPathCounts();}
   update(dt:number,running:boolean){
     this.time+=dt;

@@ -5,6 +5,7 @@ import {ASPHALT_TEXTURE_METRES,stochasticSurface,tyreMaterial,asphaltAggregateTe
 import {roadWearTexture} from './road-wear';
 import {TREE_ASSET_BASE,TREE_MODELS} from './foliage';
 import {treeLodFade} from './tree-lod';
+import {makeTreeCrossBillboard,type TreeCrossBillboard} from './tree-billboard';
 import {foliageCutoutTexture} from './foliage-cutout';
 import {treeLeafCoverage} from './tree-leaf-coverage';
 import {prepareTreeWind,treeWind} from './tree-wind';
@@ -72,8 +73,12 @@ export class SceneAssets {
   readonly roadPaint:THREE.MeshStandardMaterial;
   readonly treeViewPosition=new THREE.Vector3();
   readonly treeWindTime={value:0};
+  // All near/mid/far tree shaders share this single live debug uniform.
+  readonly treeLodDebugColors={value:0};
+  setTreeLodDebugColors(enabled:boolean){this.treeLodDebugColors.value=enabled?1:0;}
   private readonly treeMaterials=new Map<string,THREE.Material>();
   private readonly treeDepthMaterials=new Map<string,THREE.MeshDepthMaterial>();
+  private readonly treeCrossBillboards=new Map<string,TreeCrossBillboard>();
   readonly tyre=tyreMaterial();
   private readonly asphaltAggregate=asphaltAggregateTexture();
   private readonly grassRelief=grassReliefTexture();
@@ -106,7 +111,9 @@ export class SceneAssets {
     this.kerb=paintedSurface(this.pbr('concrete_layers_02',0xffffff,.93,1.25));this.kerb.envMapIntensity=.35;this.kerb.vertexColors=true;this.kerb.name='painted-concrete-kerb';this.kerb.polygonOffset=true;this.kerb.polygonOffsetFactor=-4;this.kerb.polygonOffsetUnits=-4;
     this.roadPaint=roadPaintMaterial(this.texture('clean_asphalt','normal'));
     for(const material of [this.grass,this.asphalt,this.grassVerge,this.grassFringe,this.asphaltVerge,this.runoffVerge,this.runoff,this.gravel,this.gravelSpill,this.concrete,this.roof,this.paint,this.rubber,this.alloy,this.fabric,this.carbon,this.kerb,this.roadPaint])material.userData.sharedCC0=true;
-    const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-mid`,`${name}-far`]);
+    // The old -far GLBs now act as MID. Full resolution stays NEAR, and
+    // true FAR uses crossed baked sprites instead of any 3D GLB.
+    const vegetation=TREE_MODELS.flatMap(name=>[name,`${name}-far`]);
     const models=[...vegetation,'groundcover','kart-oopi','sedan-sports','truck','cone'].map(async name=>{
       const tree=vegetation.includes(name),groundcover=name==='groundcover',gltf=await new GLTFLoader().loadAsync(`${tree||groundcover?TREE_ASSET_BASE:BASE}${name}.glb${tree?'?v=canopy-far-cards-4':groundcover?'?v=connected-grass-colonies-7':''}`);
       gltf.scene.updateMatrixWorld(true);
@@ -184,11 +191,21 @@ export class SceneAssets {
   private pbr(id:string,color:number,roughness:number,normalStrength:number,repeat=1){
     return new THREE.MeshStandardMaterial({color,roughness,map:this.texture(id,'color',repeat),normalMap:this.texture(id,'normal',repeat),roughnessMap:this.texture(id,'roughness',repeat),normalScale:new THREE.Vector2(normalStrength,normalStrength)});
   }
+  treeBillboard(name:string){
+    let billboard=this.treeCrossBillboards.get(name);
+    if(billboard)return billboard;
+    const source=this.models.get(name);
+    if(!source)throw new Error('Missing highest-detail tree model: '+name);
+    billboard=makeTreeCrossBillboard(name,source,()=>this.invalidate());
+    for(const material of billboard.materials)treeLodFade(material,2,this.treeViewPosition,this.treeLodDebugColors);
+    this.treeCrossBillboards.set(name,billboard);
+    return billboard;
+  }
   treeMaterial(source:THREE.Material|THREE.Material[],level:number):THREE.Material|THREE.Material[]{
     if(Array.isArray(source))return source.map(material=>this.treeMaterial(material,level) as THREE.Material);
     const key=`${source.uuid}/${level}`;let material=this.treeMaterials.get(key);if(material)return material;
     material=source.clone();material.onBeforeCompile=source.onBeforeCompile;material.customProgramCacheKey=source.customProgramCacheKey.bind(source);material.userData.sharedCC0=true;
-    treeLodFade(material,level,this.treeViewPosition);this.treeMaterials.set(key,material);return material;
+    treeLodFade(material,level,this.treeViewPosition,this.treeLodDebugColors);this.treeMaterials.set(key,material);return material;
   }
   treeDepthMaterial(source:THREE.Material,level:number){
     const key=`${source.uuid}/${level}`;let material=this.treeDepthMaterials.get(key);if(material)return material;

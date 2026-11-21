@@ -71,6 +71,7 @@ $('#app').innerHTML=`
         <output class="debug-buffer-status" id="debug-buffer-status">Score 路径调试尚未开启</output>
         <label class="debug-switch-row"><span>草聚集算法噪声<small>绿色：密集　橙色：稀疏</small></span><input class="switch" type="checkbox" id="debug-grass-noise"/></label>
         <label class="debug-switch-row"><span>草撮随机染色<small>每撮固定随机颜色，方便检查覆盖和重复</small></span><input class="switch" type="checkbox" id="debug-grass-colors"/></label>
+        <label class="debug-switch-row"><span>树木 LOD 染色<small>Near 绿色 · Mid 黄色 · Far 红色；每棵树随机明暗</small></span><input class="switch" type="checkbox" id="debug-tree-lod-colors"/></label>
         <p class="debug-hint">仅叠加显示，不影响地形、草的分布与车辆碰撞。</p>
       </section>
       <section class="workshop-card track-card" aria-label="赛道选择与编辑">
@@ -325,6 +326,7 @@ function syncDebugLayers(){
   game?.setDebugLayer('bufferPaths',showPaths);
   game?.setDebugLayer('grassNoise',$<HTMLInputElement>('#debug-grass-noise').checked);
   game?.setGrassDebugColors($<HTMLInputElement>('#debug-grass-colors').checked);
+  game?.setTreeLodDebugColors($<HTMLInputElement>('#debug-tree-lod-colors').checked);
   const counts=game?.getDebugBufferPathCounts();
   $('#debug-buffer-status').textContent=!showPaths?'Score 路径调试尚未开启':!counts?'正在等待 3D 场景…':
     `已生成：Score ${counts.scoreSegments} 段 · 高风险 ${counts.highRiskSegments} 段 · 向外诊断 ${counts.outwardVectors} 条`;
@@ -332,6 +334,7 @@ function syncDebugLayers(){
 $('#debug-buffer-paths').addEventListener('change',syncDebugLayers);
 $('#debug-grass-noise').addEventListener('change',syncDebugLayers);
 $('#debug-grass-colors').addEventListener('change',syncDebugLayers);
+$('#debug-tree-lod-colors').addEventListener('change',syncDebugLayers);
 $('#drive-tab').addEventListener('click',()=>running?setEditorVisible(false):startDrive());$('#editor-tab').addEventListener('click',()=>{if(running)exitDrive();else setEditorVisible(true);});$('#exit-button').addEventListener('click',exitDrive);$('#pause-button').addEventListener('click',pause);$('#reset-button').addEventListener('click',resetKart);
 document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(b=>b.addEventListener('click',()=>setCamera(b.dataset.camera as CameraMode)));
 

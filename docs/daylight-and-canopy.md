@@ -1,5 +1,21 @@
 # 晴天光照与树冠渲染
 
+## Far 交叉贴图树叶降饱和（2026-11-21）
+
+Far 交叉面片使用离线已受光的高模烘焙图和 `MeshBasicMaterial`，因此无法像 Near/Mid PBR 树冠一样获得实时的定向受光层次，远处的浅黄绿叶片显得偏鲜。现在 `src/tree-billboard.ts` 在 `map_fragment` 之后，只对绿色占优的树叶像素（连续 `smoothstep` 权重）做调色：约 46% 的灰橄榄色明度混合，并将受影响像素的亮度乘约 0.84，保留树叶内部的阴影/纹理对比与 PNG Alpha，非绿色树干尽量不动；无需修改原始 PNG、重新烘焙、调 Near/Mid 或改变 LOD 距离。此步骤发生在 `treeLodFade` 的 Debug 红色覆盖之前，因此 Far Debug 开启时依然纯红。
+
+## 树木 LOD Debug 覆盖染色（2026-11-21）
+
+右侧「Debug 显示层」新增 **树木 LOD 染色** 开关：Near 高模亮绿、Mid（原 `*-far.glb`）亮黄、Far（两片交叉贴图）亮红。`src/tree-lod.ts` 的 `treeLodFade()` 在**彩色材质**的 `<color_fragment>` 之后，用可随时切换的 shared uniform 替换 RGB，不影响贴图 Alpha、树冠边缘透明裁切、LOD dither 和阴影深度通道。彩色覆盖会沿用实际物理材质的光照（Far 的烘焙贴图为 MeshBasic），但高模和中模的原色不会透出来。每棵树基于实例根部的世界 XZ 坐标产生固定随机亮度 `0.65–1.0`，同棵树的树干、树叶、LOD 切换前后的亮度保持一致。切换不重新分布植被、不重新构建实例，也无需重新编译 Shader，关闭后恢复原始材质颜色。开关随 `syncDebugLayers()` 在切换赛道和重新创建 `GameScene` 时同步。
+
+## 树木 LOD：高模、原 far 中模、双面板 far（2026-11-21）
+
+已通过 Beacon 在 `X:\\apex-kart` 执行离线烘焙，三个树种 `oak`、`ash`、`pine` 每种生成正视图和侧视图各 1 张 **1024×1024 透明 PNG**，共 6 张，位于 `public/assets/vegetation/tree-billboards/`。来源分别是最高精度 `oak.glb`、`ash.glb`、`pine.glb`，并非旧 mid/far 模型。`scripts/bake-tree-billboards.mjs` 启动本地临时 HTTP 服务和独立无头 Chrome WebGL；`scripts/tree-billboard-bake.html` 通过 `GLTFLoader` 加载高模，以从 +Z、+X 朝向树木的正交相机生成真实 PNG 和包围盒元数据。使用 `pnpm assets:tree-billboards` 可重新烘焙，要求本机安装 Chrome。它属于用户明确要求的离线**素材烘焙**，不是浏览器验收或自动截图测试。
+
+运行时 `SceneAssets` 只加载近景高模和原 `*-far.glb`（现在作为 **Mid**），不再加载原 `*-mid.glb`；旧 `*-mid.glb` 文件暂时保留，未删除。`src/tree-billboard.ts` 用高模包围盒自动对齐树根和尺寸，创建一个合并几何体中的 **2 张互相垂直的矩形面，共 4 个三角形**：正面绑定 front，侧面绑定 side，两张贴图使用不同材质组。`src/scene.ts` 为树种按地块实例化 Near（高模）/Mid（旧 Far GLB）/Far（交叉面片），保留随机旋转、伸缩、颜色和按实例 LOD 过渡；远景贴图通过 `foliageCutoutTexture` 生成保留 Alpha 覆盖率的 mipmap，减少远处树冠变稀和黑边。烘焙图包含离线光照，远景采用 MeshBasicMaterial 避免再次给图像整体加光，且不投动态树影。
+
+距离没有更改：Near 在 42–72m 逐步淡出，Mid 在 42–72m 渐入并在 145–210m 渐出，Far 在 145–210m 渐入。以上只作编译验证，未运行游戏画面测试或性能基准。
+
 真实赛道与手绘赛道共用这一套渲染逻辑。改动集中在光照、共享材质和离线树木素材，没有调整赛道数据、碰撞、植被数量或 LOD 距离。
 
 ## 太阳与天空

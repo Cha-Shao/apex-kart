@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Offline tree billboard baker</title>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script></head>
+<body><script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+
+const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(1);
+renderer.setSize(1024,1024,false);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.0;
+renderer.setClearColor(0x000000,0);
+renderer.shadowMap.enabled=false;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.background=null;
+scene.add(new THREE.HemisphereLight(0xe4ecff,0x6b705b,2.15));
+const sunlight=new THREE.DirectionalLight(0xfff5de,2.1);
+sunlight.position.set(-4,9,7);scene.add(sunlight);
+const fill=new THREE.DirectionalLight(0xc4dbff,.65);
+fill.position.set(6,4,-6);scene.add(fill);
+const loader=new GLTFLoader();
+const models=new Map();
+window.__bakeReady=false;
+window.__bakeError='';
+window.__bakePrepare=(async()=>{
+  try{
+    for(const name of ['oak','ash','pine']){
+      const gltf=await loader.loadAsync('/public/assets/vegetation/'+name+'.glb');
+      gltf.scene.updateMatrixWorld(true);
+      gltf.scene.traverse(item=>{
+        if(!item.isMesh)return;
+        for(const material of Array.isArray(item.material)?item.material:[item.material]){
+          if(material.name.match(/leaves|twig/i)){
+            material.side=THREE.DoubleSide;
+            material.depthWrite=true;
+            material.transparent=false;
+            material.alphaTest=Math.max(material.alphaTest||0,.24);
+          }
+        }
+      });
+      models.set(name,gltf.scene);
+    }
+    window.__bakeReady=true;
+  }catch(error){window.__bakeError=String(error);throw error;}
+})();
+window.bakeTree=async (name,orientation)=>{
+  await window.__bakePrepare;
+  const model=models.get(name);
+  if(!model)throw new Error('Unknown tree: '+name);
+  for(const object of models.values())object.removeFromParent();
+  scene.add(model);model.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(model);
+  const min=box.min,max=box.max,center=box.getCenter(new THREE.Vector3());
+  const width=orientation==='front'?max.x-min.x:max.z-min.z;
+  const height=max.y-min.y;
+  const halfWidth=Math.max(.2,width)*.545;
+  const halfHeight=Math.max(.2,height)*.545;
+  const camera=new THREE.OrthographicCamera(-halfWidth,halfWidth,halfHeight,-halfHeight,.01,500);
+  if(orientation==='front')camera.position.set(center.x,center.y,center.z+Math.max(25,width*2));
+  else camera.position.set(center.x+Math.max(25,width*2),center.y,center.z);
+  camera.lookAt(center);
+  camera.updateProjectionMatrix();
+  renderer.clear(true,true,true);
+  renderer.render(scene,camera);
+  const png=renderer.domElement.toDataURL('image/png');
+  return {png,bounds:{min:box.min.toArray(),max:box.max.toArray()},name,orientation};
+};
+</script></body></html>

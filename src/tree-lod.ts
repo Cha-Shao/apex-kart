@@ -18,21 +18,41 @@ export class TreeLOD extends THREE.Group {
 }
 
 /** Complementary opaque cutouts avoid blend sorting, including in shadows. */
-export function treeLodFade(material:THREE.Material,level:number,viewPosition:THREE.Vector3){
+export function treeLodFade(material:THREE.Material,level:number,viewPosition:THREE.Vector3,debugColors?:{value:number}){
   const compile=material.onBeforeCompile,cacheKey=material.customProgramCacheKey();
   material.onBeforeCompile=(shader,renderer)=>{
     compile.call(material,shader,renderer);shader.uniforms.treeLodViewPosition={value:viewPosition};
+    if(debugColors)shader.uniforms.treeLodDebugColors=debugColors;
     shader.vertexShader=shader.vertexShader
-      .replace('#include <common>','#include <common>\nuniform vec3 treeLodViewPosition;varying float vTreeLodDistance;')
+      .replace('#include <common>',`#include <common>
+        uniform vec3 treeLodViewPosition;varying float vTreeLodDistance;
+        ${debugColors?'varying float vTreeDebugBrightness;':''}
+      `)
       .replace('#include <begin_vertex>',`#include <begin_vertex>
         vec4 treeLodAnchor=vec4(0.0,0.0,0.0,1.0);
         #ifdef USE_INSTANCING
         treeLodAnchor=instanceMatrix*treeLodAnchor;
         #endif
-        vTreeLodDistance=distance((modelMatrix*treeLodAnchor).xyz,treeLodViewPosition);
+        vec3 treeLodWorld=(modelMatrix*treeLodAnchor).xyz;
+        vTreeLodDistance=distance(treeLodWorld,treeLodViewPosition);
+        ${debugColors?`
+          // Same instance root in all 3 LODs, all branch/leaf materials.
+          // Stable per-tree brightness, not a per-pixel flickering tint.
+          vec2 treeId=floor(treeLodWorld.xz*32.0);
+          float treeRandom=fract(sin(dot(treeId,vec2(127.1,311.7)))*43758.5453);
+          vTreeDebugBrightness=mix(0.65,1.0,treeRandom);
+        `:''}
       `);
     shader.fragmentShader=shader.fragmentShader
-      .replace('#include <common>','#include <common>\nvarying float vTreeLodDistance;')
+      .replace('#include <common>',`#include <common>
+        varying float vTreeLodDistance;
+        ${debugColors?'uniform float treeLodDebugColors;varying float vTreeDebugBrightness;':''}
+      `)
+      .replace('#include <color_fragment>',debugColors?`#include <color_fragment>
+        // Only diffuse RGB is overwritten: silhouette, depth, lighting and
+        // the existing per-instance LOD dither remain fully intact.
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(${level===0?'0.045,0.92,0.14':level===1?'0.98,0.82,0.045':'0.98,0.055,0.065'})*vTreeDebugBrightness,treeLodDebugColors);
+      `:'#include <color_fragment>')
       // Both colour and depth shaders retain this hook after alpha testing,
       // including foliage materials that provide their own MSAA edge filter.
       .replace('#include <alphahash_fragment>',`#include <alphahash_fragment>
@@ -42,5 +62,5 @@ export function treeLodFade(material:THREE.Material,level:number,viewPosition:TH
         ${level===0?'if(treeLodNoise>=treeNearOut)discard;':level===1?'if(treeLodNoise<treeNearOut||treeLodNoise>=treeMidOut)discard;':'if(treeLodNoise<treeMidOut)discard;'}
       `);
   };
-  material.customProgramCacheKey=()=>`${cacheKey}:tree-crossfade-v2-${level}`;return material;
+  material.customProgramCacheKey=()=>`${cacheKey}:tree-crossfade-v3-${level}-${debugColors?'debug-tint':'depth'}`;return material;
 }
