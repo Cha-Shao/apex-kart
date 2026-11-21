@@ -3,6 +3,7 @@ import {FullScreenQuad} from 'three/addons/postprocessing/Pass.js';
 import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {CascadeSun} from './cascade-sun';
+import {createCloudShadowTexture,CLOUD_SHADOW_SPEED,CLOUD_SHADOW_STRENGTH} from './cloud-shadows';
 import {TemporalMaterials} from './temporal-materials';
 import {SunLensFlare} from './sun-lens-flare';
 import {fullscreenVertex,volumeFragment,combineFragment,temporalFragment} from './daylight-post-shaders';
@@ -43,6 +44,7 @@ export class DaylightPipeline {
   private projection=new THREE.Matrix4();
   private write=0;
   private white=new THREE.DataTexture(new Uint8Array([255,255,255,255]),1,1);
+  private cloudShadowMap=createCloudShadowTexture();
 
   constructor(private renderer:THREE.WebGLRenderer,private scene:THREE.Scene,private camera:THREE.PerspectiveCamera){
     this.supported=renderer.extensions.has('EXT_color_buffer_float');
@@ -76,7 +78,9 @@ export class DaylightPipeline {
     });
     this.combine=post(combineFragment,{
       sceneColour:{value:this.sceneTarget.textures[0]},sceneDepth:{value:this.sceneTarget.depthTexture},ambientOcclusion:{value:this.gtao.gtaoMap},volume:{value:this.volumeTarget.texture},
-      halfResolution:{value:new THREE.Vector2()},inverseProjection:{value:camera.projectionMatrixInverse},
+      halfResolution:{value:new THREE.Vector2()},inverseProjection:{value:camera.projectionMatrixInverse},cameraWorld:{value:camera.matrixWorld},
+      cloudShadowMap:{value:this.cloudShadowMap},cloudSunDirection:{value:new THREE.Vector3()},cloudTime:{value:0},
+      cloudWindSpeed:{value:CLOUD_SHADOW_SPEED},cloudShadowStrength:{value:CLOUD_SHADOW_STRENGTH},
     });
     this.temporal=post(temporalFragment,{
       currentColour:{value:this.combined.texture},historyColour:{value:null},sceneDepth:{value:this.sceneTarget.depthTexture},motion:{value:this.sceneTarget.textures[1]},
@@ -109,6 +113,8 @@ export class DaylightPipeline {
       this.previousProjection.copy(this.camera.projectionMatrix);
     }
     if(!this.supported){this.sun.update(this.scene,sunDirection);this.renderer.shadowMap.needsUpdate=true;this.renderer.render(this.scene,this.camera);return;}
+    this.combine.uniforms.cloudTime.value=time;
+    this.combine.uniforms.cloudSunDirection.value.copy(sunDirection);
     this.motion.prepare(this.scene,dynamicRoots,this.sceneTarget.samples>0);this.sun.update(this.scene,sunDirection);
     this.projection.copy(this.camera.projectionMatrix);
     const index=this.frame%8+1;
@@ -140,6 +146,6 @@ export class DaylightPipeline {
   }
   dispose(){
     this.sun.dispose();this.flare.dispose();this.sceneTarget.dispose();this.combined.dispose();this.history.forEach(t=>t.dispose());this.volumeTarget.dispose();
-    this.gtao.dispose();this.gtao.gtaoMaterial.dispose();this.gtao.blendMaterial.dispose();this.output.dispose();this.volume.dispose();this.combine.dispose();this.temporal.dispose();this.white.dispose();this.quad.dispose();
+    this.gtao.dispose();this.gtao.gtaoMaterial.dispose();this.gtao.blendMaterial.dispose();this.output.dispose();this.volume.dispose();this.combine.dispose();this.temporal.dispose();this.white.dispose();this.cloudShadowMap.dispose();this.quad.dispose();
   }
 }

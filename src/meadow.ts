@@ -8,6 +8,7 @@ import {vegetationEdgeWeight,VEGETATION_ROOT_OFFSET} from './vegetation-edge';
 import {VEGETATION_RENDER_ORDER} from './vegetation-render-order';
 
 const CELL=24,LOAD_RADIUS=84,KEEP_RADIUS=112;
+const GRASS_DENSITY=0.75;
 type LandPlacement=(p:Point,margin?:number)=>boolean;
 type MaterialFactory=(source:THREE.Material|THREE.Material[],model:PlantModel,level:number,birth:number)=>THREE.Material;
 interface Placement extends Point {y:number;scale:number;spread:number;stretch:number;rotation:number;tint:THREE.Color}
@@ -61,7 +62,7 @@ export class MeadowField extends THREE.Group {
       // Broad dark patches carry more small tufts, bright areas expose soil.
       // A single instance is one bent tuft card, not a collection of cards.
       const density=vegetationCoverDensity(px,pz);
-      if(vegetationHash(ix,iz,3197)>.025+.95*density)continue;
+      if(vegetationHash(ix,iz,3197)>(.025+.95*density)*GRASS_DENSITY)continue;
       const high=vegetationHash(ix,iz,7219)<.1+.18*density;
       put(px,pz,high);
     }

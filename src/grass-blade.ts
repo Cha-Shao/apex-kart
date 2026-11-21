@@ -3,6 +3,9 @@ import * as THREE from 'three';
 export const GRASS_BLADE_KINDS=['grass-short-a','grass-short-b','grass-tall-a','grass-tall-b'] as const;
 export type GrassBladeKind=typeof GRASS_BLADE_KINDS[number];
 
+// Double grass tuft size without changing spawn density or other vegetation.
+const GRASS_VISUAL_SCALE=2;
+
 interface TuftShape {
   height:number;width:number;lowerLean:number;upperLean:number;
   // Original grass_N files are used DIRECTLY. The UV window trims only the
@@ -40,7 +43,7 @@ function tuftGeometry(shape:TuftShape){
   for(let row=0;row<3;row++){
     const t=row/2,offset=row===0?0:row===1?shape.lowerLean:shape.lowerLean+shape.upperLean;
     for(const side of [-1,1]){
-      positions.push(side*shape.width*.5+offset,shape.height*t,row*.005);
+      positions.push((side*shape.width*.5+offset)*GRASS_VISUAL_SCALE,shape.height*t*GRASS_VISUAL_SCALE,row*.005*GRASS_VISUAL_SCALE);
       uvs.push(side<0?uLeft:uRight,vTop*t);
       roots.push(0,0);heights.push(t);
     }

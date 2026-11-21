@@ -47,10 +47,26 @@ void main(){
 
 export const combineFragment=`
 varying vec2 vUv;
-uniform sampler2D sceneColour,sceneDepth,ambientOcclusion,volume;
+uniform sampler2D sceneColour,sceneDepth,ambientOcclusion,volume,cloudShadowMap;
 uniform vec2 halfResolution;
-uniform mat4 inverseProjection;
+uniform mat4 inverseProjection,cameraWorld;
+uniform vec3 cloudSunDirection;
+uniform float cloudTime,cloudWindSpeed,cloudShadowStrength;
 vec3 viewPosition(vec2 uv,float d){vec4 p=inverseProjection*vec4(uv*2.0-1.0,d*2.0-1.0,1.0);return p.xyz/p.w;}
+float cloudOcclusion(vec3 world){
+  // Project surface points towards a high cloud plane along the HDR sun.
+  vec2 sunReach=cloudSunDirection.xz/max(cloudSunDirection.y,.28);
+  vec2 cloudPlane=world.xz+sunReach*(1450.0-world.y);
+  // Both independently generated channels repeat perfectly at their edges.
+  // Separate physical scales and wind velocities break up visible tiling.
+  vec2 broadWind=vec2(.88,.475)*cloudTime*cloudWindSpeed;
+  vec2 detailWind=vec2(.94,.342)*cloudTime*(cloudWindSpeed*.62);
+  float broad=texture2D(cloudShadowMap,(cloudPlane-broadWind)/1200.0).r;
+  float detail=texture2D(cloudShadowMap,(cloudPlane-detailWind+vec2(327.0,-579.0))/600.0).g;
+  // Narrower density transition makes both bright gaps and deep cloud cover
+  // visually distinct while preserving continuously soft, seamless edges.
+  return cloudShadowStrength*smoothstep(.47,.56,mix(broad,detail,.18));
+}
 void main(){
   float d=texture2D(sceneDepth,vUv).r;vec3 p=viewPosition(vUv,d);
   float depthLog=log2(1.0+length(p)),weight=0.0,ao=0.0;vec3 light=vec3(0.0);
@@ -65,7 +81,10 @@ void main(){
   }
   vec3 colour=texture2D(sceneColour,vUv).rgb;
   float visibility=d>=.999999?1.0:mix(1.0,clamp(ao/weight,0.0,1.0),.3);
-  gl_FragColor=vec4(colour*visibility+light/weight,1.0);
+  // Sky has no surface depth: cloud cover only darkens real geometry.
+  float shade=d>=.999999?0.0:cloudOcclusion((cameraWorld*vec4(p,1.0)).xyz);
+  // Keep the environment fill readable and gently attenuate scattered sun.
+  gl_FragColor=vec4(colour*visibility*(1.0-shade)+light/weight*(1.0-shade*.6),1.0);
 }`;
 
 export const temporalFragment=`
