@@ -129,13 +129,16 @@ function gravelSpill(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
       const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<.025)continue;
       const nx=dz/length*orientation,nz=-dx/length*orientation,cuts=Math.max(1,Math.ceil(length/1.2));
       for(let k=0;k<cuts;k++){
-        const from={x:a.x+dx*k/cuts,z:a.z+dz*k/cuts},to={x:a.x+dx*(k+1)/cuts,z:a.z+dz*(k+1)/cuts},mid={x:(from.x+to.x)*.5+nx*.02,z:(from.z+to.z)*.5+nz*.02};
+        const from={x:a.x+dx*k/cuts,z:a.z+dz*k/cuts},to={x:a.x+dx*(k+1)/cuts,z:a.z+dz*(k+1)/cuts},mid={x:(from.x+to.x)*.5+nx*.06,z:(from.z+to.z)*.5+nz*.06};
         if(contains(mid))continue;
-        const p={x:from.x-nx*.06,z:from.z-nz*.06},q={x:from.x+nx*.34,z:from.z+nz*.34},r={x:to.x-nx*.06,z:to.z-nz*.06},s={x:to.x+nx*.34,z:to.z+nz*.34};
+        // Carry the same gravel PBR grains 0.92m beyond the material edge.
+        // The shader fades to ZERO by 0.82m, so the strip's geometry edge
+        // cannot reintroduce a visible straight cut through the dust.
+        const p={x:from.x-nx*.18,z:from.z-nz*.18},q={x:from.x+nx*.92,z:from.z+nz*.92},r={x:to.x-nx*.18,z:to.z-nz*.18},s={x:to.x+nx*.92,z:to.z+nz*.92};
         if(![p,q,r,s].every(v=>land(v,.1)))continue;
         // A few millimetres over the road plane, retaining normal depth tests
         // for vehicles and overpasses. This is a visual deposit, not a collider.
-        const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+TRACK_SURFACE_HEIGHT+.004,terrain),base=positions.length/3;
+        const data=drapeTriangles([[p,q,r],[q,s,r]],(x,z)=>terrain.sample(x,z)+TRACK_SURFACE_HEIGHT+.008,terrain),base=positions.length/3;
         for(let v=0;v<data.vertices.length;v+=3){const x=data.vertices[v],z=data.vertices[v+2];positions.push(x,data.vertices[v+1],z);verges.push((x-from.x)*nx+(z-from.z)*nz,0);}
         for(const v of data.indices)indices.push(base+v);
       }
@@ -143,7 +146,10 @@ function gravelSpill(group:THREE.Group,track:TrackData,terrain:TerrainField,asse
   }
   if(!indices.length)return;
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('verge',new THREE.Float32BufferAttribute(verges,2));geometry.setIndex(indices);surfaceUVs(geometry,GRAVEL_TEXTURE_METRES);terrainNormals(geometry,terrain);
-  const mesh=new THREE.Mesh(geometry,assets.gravelSpill);mesh.name='loose-gravel-over-road-and-grass';mesh.receiveShadow=true;mesh.renderOrder=1;group.add(mesh);
+  const mesh=new THREE.Mesh(geometry,assets.gravelSpill);mesh.name='loose-gravel-over-road-and-grass';mesh.receiveShadow=true;
+  // The source gravel/asphalt priority surfaces are already drawn; this
+  // depth-tested transparent deposit goes above them without z-fighting.
+  mesh.renderOrder=75;group.add(mesh);
 }
 
 function facilities(group:THREE.Group,track:TrackData,terrain:TerrainField,assets:SceneAssets,layers:DetailLayer[],land:LandPlacement){

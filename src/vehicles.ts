@@ -2,7 +2,7 @@ import {KART_SPEC} from './kart-spec';
 export type VehicleId='kart'|'rb20';
 export interface VehicleProfile {
  id:VehicleId;name:string;mass:number;width:number;length:number;number:string;
- wheelRadius:number;frontTyreWidth:number;rearTyreWidth:number;frontHalfTrack:number;rearHalfTrack:number;frontZ:number;rearZ:number;wheelbase:number;
+ wheelRadius:number;frontWheelRadius?:number;rearWheelRadius?:number;frontTyreWidth:number;rearTyreWidth:number;frontHalfTrack:number;rearHalfTrack:number;frontZ:number;rearZ:number;wheelbase:number;
  connectionY:number;visualOffset:number;suspensionRestLength:number;suspensionStiffness:number;suspensionTravel:number;rideHeight:number;
  // Box dimensions also define handling inertia when a sphere replaces the box.
  chassisHalf:[number,number,number];chassisOffset:number;chassisRadius?:number;
@@ -11,7 +11,6 @@ export interface VehicleProfile {
 }
 export const VEHICLES:Record<VehicleId,VehicleProfile>={
  kart:{id:'kart',name:'APX–07',mass:165,width:1.35,length:1.80,number:'07',...KART_SPEC,
- frontTyreWidth:.23*KART_SPEC.artScale.x,rearTyreWidth:.29*KART_SPEC.artScale.x,
  chassisHalf:[.70*KART_SPEC.artScale.x,.16*KART_SPEC.artScale.y,1.08*KART_SPEC.artScale.z],chassisOffset:KART_SPEC.visualOffset+.02*KART_SPEC.artScale.y,
  driveForce:1120,powerWatts:0,topSpeed:27,drag:.46,rollingResistance:19,downforce:0,grip:2.15,brakeG:1.45,
  idleRPM:1500,maxRPM:4800,steeringRatio:1.8,cockpitEye:[0,.80,.20],cockpitGaze:[0,.80-12*.32,.20-12],cockpitFov:82,chase:[0,4.2,7.4]},

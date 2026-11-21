@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {Vec3} from 'cannon-es';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeKart } from './kart';
+import { KART_SPEC } from './kart-spec';
 import { makeRB20 } from './rb20';
 import { KartPhysics } from './physics';
 import { bridgeHeight, curbGeometry, runoffGeometry, curbWidth, TRACK_SURFACE_HEIGHT, nearestOnTrack, type TrackData, type TrackSettings } from './track';
@@ -11,8 +12,9 @@ import { TyreMarks } from './tyre-marks';
 import { SceneAssets, surfaceUVs, terrainGrassColor, disposeSceneGroup } from './scene-assets';
 import {surfaceTrack,terrainNormals} from './surface-track';
 import {drapeTriangles,TERRAIN_SURFACE_OFFSET} from './terrain-mesh';
-import {tyreGeometry,GRAVEL_TEXTURE_METRES,ASPHALT_TEXTURE_METRES} from './surface-materials';
+import {GRAVEL_TEXTURE_METRES,ASPHALT_TEXTURE_METRES} from './surface-materials';
 import {ContactShadow,addGroundContactShadows} from './contact-shadow';
+import {addFarTreeShadows} from './far-tree-shadows';
 import {vegetationLayout,addTrackEnvironment,type DetailLayer} from './track-environment';
 import {START_LIGHT_COUNT} from './start-signal';
 import {startGridSlots} from './start-grid';
@@ -49,6 +51,9 @@ export class GameScene {
   private slipVelocity=new Vec3();
   private slipGroundVelocity=new Vec3();
   private target=new THREE.Vector3();
+  private visualGroundPivot=new THREE.Vector3();
+  private readonly wheelRollAxis=new THREE.Vector3(-1,0,0);
+  private readonly wheelRollCorrection=new THREE.Quaternion();
   private desired=new THREE.Vector3();
   private resizeObserver:ResizeObserver;
   private tyreMarks:TyreMarks;
@@ -127,29 +132,89 @@ export class GameScene {
     const imported=source.getObjectByName('kart-oopi')?.clone(true);if(!imported)return;
     const remove:THREE.Object3D[]=[];imported.traverse(o=>{if(o.name.startsWith('wheel')||o.name==='character')remove.push(o);});remove.forEach(o=>o.removeFromParent());
     const spec=this.physics.profile;
+    // The GLB's alloy primitive includes the bumper, side bodywork and twin
+    // exhausts. Do NOT remap it to SceneAssets.alloy: that globally shared
+    // high-metalness material relies on an environment reflection and can
+    // make these low-poly metal surfaces read as black/disappear. The original
+    // GLB materials are one-sided; keep both faces visible on the thin alloy
+    // panels and pipes. Clone materials so the shared GLB is not modified.
     imported.traverse(object=>{
       if(!(object instanceof THREE.Mesh))return;
-      object.geometry=object.geometry.clone();object.geometry.userData.sharedCC0=false;
-      const p=object.geometry.getAttribute('position');
-      // Fit axle locations independently of the donor's cartoon overhangs.
-      // The physics, wheelbase and cockpit stay in the game's metre specification.
-      for(let i=0;i<p.count;i++){
-        const z=p.getZ(i),front=.323733032,rear=-.3606073;
-        const fitted=z>front?spec.frontZ-(z-front)*.42:z<rear?spec.rearZ+(rear-z)*.5:spec.rearZ+(z-rear)/(front-rear)*(spec.frontZ-spec.rearZ);
-        p.setXYZ(i,-p.getX(i)*1.3,p.getY(i)*.7-.137,fitted);
-      }
-      p.needsUpdate=true;object.geometry.computeVertexNormals();object.geometry.computeBoundingBox();object.geometry.computeBoundingSphere();
+      const localMaterial=(sourceMaterial:THREE.Material)=>{
+        const material=sourceMaterial.clone();
+        material.name='kart-oopi-shell-'+sourceMaterial.name;
+        material.userData.sharedCC0=false;
+        material.side=THREE.DoubleSide;
+        if(material instanceof THREE.MeshStandardMaterial){
+          if(sourceMaterial.name==='kart-alloy'){
+            material.color.set(0xa7b0b7);
+            material.metalness=.28;material.roughness=.58;
+            material.envMapIntensity=.55;
+            material.roughnessMap=null;
+          }else if(sourceMaterial.name==='kart-paint'){
+            material.color.copy(this.kart.paint.color);
+            material.metalness=.18;material.roughness=.46;
+          }else if(sourceMaterial.name==='kart-trim'){
+            material.color.set(0x384047);
+            material.metalness=.12;material.roughness=.73;
+          }
+        }
+        return material;
+      };
+      object.material=Array.isArray(object.material)
+        ?object.material.map(localMaterial):localMaterial(object.material);
+      object.castShadow=true;object.receiveShadow=true;
     });
-    this.clearGroup(this.kart.body);this.kart.body.add(imported);this.kart.body.scale.set(1/this.kart.root.scale.x,1/this.kart.root.scale.y,1/this.kart.root.scale.z);this.kart.body.userData.cc0=true;
+    // The original GLB is ONE combined body mesh (including front fairing
+    // and both upright exhausts). NEVER rewrite its vertices individually:
+    // piecewise Z remapping introduced stretching and disconnected-looking
+    // parts, and the Y compression hid the pipes under the bodywork.
+    // Keep the authored vertices, normals, UVs, material groups and topology
+    // untouched. Rotate the whole intact model into the -Z driving direction.
+    const donorFront=source.getObjectByName('wheel-front-left');
+    const donorRear=source.getObjectByName('wheel-back-left');
+    if(!donorFront||!donorRear)return;
+    const donorWheelbase=donorFront.position.z-donorRear.position.z;
+    if(donorWheelbase<=0)return;
+    const fitZ=(spec.rearZ-spec.frontZ)/donorWheelbase;
+    imported.rotation.y=Math.PI;
+    // Expand the original narrow donor shell just enough that its rear body
+    // side sits immediately inside the real rear slicks, not 25cm away.
+    // This is one affine object transform, NOT a piecewise geometry rewrite.
+    const donorShellHalfWidth=.2920918167; // native body at rear axle
+    const shellX=(spec.rearHalfTrack-spec.rearTyreWidth*.5)/donorShellHalfWidth;
+    // Restore the high twin-exhaust silhouette. The donor was authored
+    // around much larger toy wheels; a 1:1 vertical scale plus the kart
+    // driver made the pipes look buried. Scale the WHOLE mesh vertically,
+    // and anchor its lowest fairing point above the road, not to a toy hub.
+    imported.scale.set(shellX,1.4,fitZ);
+    // Align source wheels' longitudinal positions to the *physics* axles.
+    imported.position.z=spec.frontZ+donorFront.position.z*fitZ;
+    imported.updateMatrixWorld(true);
+    const donorBounds=new THREE.Box3().setFromObject(imported);
+    const clearance=.035; // bottom of original front bumper above the road
+    imported.position.y=clearance-spec.rideHeight-spec.visualOffset-donorBounds.min.y;
+    // Imported materials are intentionally shared with SceneAssets. Preserve
+    // their ownership and avoid disposing procedural driver's shared materials
+    // (metal/rubber/fabric) while removing the fallback chassis geometry.
+    this.kart.body.traverse(object=>{
+      if(object instanceof THREE.Mesh&&!object.geometry.userData.sharedCC0)object.geometry.dispose();
+    });
+    this.kart.body.clear();
+    this.kart.body.add(imported);
+    // Cancel only the procedural art scale on the chassis; steering, driver
+    // and plates remain under the unchanged kart.root transform.
+    // Cancel the original anisotropic procedural art scale while respecting
+    // the requested whole-chassis visual multiplier (now back to 1.0).
+    this.kart.body.scale.set(KART_SPEC.visualScale/this.kart.root.scale.x,
+      KART_SPEC.visualScale/this.kart.root.scale.y,
+      KART_SPEC.visualScale/this.kart.root.scale.z);
+    this.kart.body.userData.cc0=true;
     this.assets.paint.color.copy(this.kart.paint.color);this.kart.paint=this.assets.paint;
-    const names=['wheel-front-left','wheel-front-right','wheel-back-left','wheel-back-right'];
-    for(let i=0;i<4;i++){
-      const wheel=source.getObjectByName(names[i])?.clone(true);if(!wheel)continue;
-      wheel.position.set(0,0,0);wheel.rotation.set(0,Math.PI,0);
-      wheel.scale.set((i<2?spec.frontTyreWidth:spec.rearTyreWidth)/.20977735,spec.wheelRadius/.20977734,spec.wheelRadius/.20977734);
-      wheel.traverse(object=>{if(object instanceof THREE.Mesh){const tyre=!Array.isArray(object.material)&&object.material.name==='kart-rubber';object.geometry=tyre?tyreGeometry(.20977734,.20977735):object.geometry.clone();object.geometry.userData.sharedCC0=false;if(!tyre)object.geometry.translate(i%2===0?-.10488868:.10488868,0,0);}});
-      this.clearGroup(this.kart.wheelMeshes[i]);this.kart.wheelMeshes[i].scale.setScalar(1);this.kart.wheelMeshes[i].add(wheel);
-    }
+    // Keep the four independently driven procedural kart slicks: their
+    // 10/11-inch diameter and 5-inch gold rims are controlled by KART_SPEC.
+    // The GLB supplies the original bumper, bodywork and twin exhausts;
+    // its embedded toy wheel nodes remain excluded.
     this.applyVehicleMaterials();this.renderer.shadowMap.needsUpdate=true;
   }
   private addSurface(mesh:THREE.Mesh,order:number,name:string){
@@ -284,7 +349,8 @@ export class GameScene {
     const {trees,shrubs}=vegetationLayout(this.track,land);
     const dummy=new THREE.Object3D();
     const treeModels=TREE_MODELS;
-    if(treeModels.every(name=>['','-far'].every(suffix=>this.assets.models.has(`${name}${suffix}`)))){
+    const hasTreeLODs=treeModels.every(name=>['','-far'].every(suffix=>this.assets.models.has(`${name}${suffix}`)));
+    if(hasTreeLODs){
       for(let variant=0;variant<treeModels.length;variant++){
         const subset=trees.filter(t=>t.variant===variant),cells=new Map<string,typeof trees>();
         for(const tree of subset){const key=`${Math.floor(tree.x/32)},${Math.floor(tree.z/32)}`;const cell=cells.get(key)??[];cell.push(tree);cells.set(key,cell);}
@@ -357,6 +423,10 @@ export class GameScene {
     this.grass=new GrassField(this.track,this.terrain,shrubs,land,this.assets.models.get('groundcover'));
     this.grass.setDebugColors(this.grassDebugColorsEnabled);this.scenery.add(this.grass);
     this.detailLayers.push(...addGroundContactShadows(this.scenery,this.terrain,trees.map(t=>({x:t.x,z:t.z,radiusX:t.scale*(t.variant===0?.8:.65),radiusZ:t.scale*(t.variant===0?.7:.55),strength:.3,angle:t.x*13.7})),'tree-root-contact-occlusion'));
+    // Far two-card impostors cast no true shadow to avoid a cross-shaped
+    // projection. Drape sunlight-aligned canopy occlusion onto the terrain,
+    // then fade it in per tree across the same 145–210m mid/far LOD band.
+    if(hasTreeLODs)this.detailLayers.push(...addFarTreeShadows(this.scenery,this.terrain,trees,this.assets.sunDirection,this.assets.treeViewPosition));
   }
   frameTrack(){
     this.daylight.reset();
@@ -378,9 +448,44 @@ export class GameScene {
     this.assets.treeWindTime.value=this.time;
     this.water?.update(this.time);
     const body=this.physics.body;this.kart.root.quaternion.copy(body.quaternion as any);this.target.set(0,this.physics.visualOffset,0).applyQuaternion(this.kart.root.quaternion);this.kart.root.position.copy(body.position as any).add(this.target);
+    const isKart=this.physics.profile.id==='kart';
+    const kartVisualScale=isKart?KART_SPEC.visualScale:1;
+    if(isKart){
+      // One ground-level anchor for the whole visual kart. The body/driver
+      // double from .5 to 1, while independent tyres double from 1 to 2.
+      this.visualGroundPivot.set(0,-this.physics.profile.rideHeight,0)
+        .applyQuaternion(this.kart.root.quaternion).add(body.position as any);
+      if(kartVisualScale!==1){
+        this.kart.root.position.sub(this.visualGroundPivot)
+          .multiplyScalar(kartVisualScale).add(this.visualGroundPivot);
+      }
+    }
     this.kart.steering.rotation.z=this.physics.telemetry.steering*this.physics.profile.steeringRatio;
     this.kart.updateDashboard?.(this.physics.telemetry.gear??0,this.physics.telemetry.rpm);
-    this.kart.wheelMeshes.forEach((w,i)=>{const t=this.physics.vehicle.wheelInfos[i].worldTransform;w.position.copy(t.position as any);w.quaternion.copy(t.quaternion as any);});
+    this.kart.wheelMeshes.forEach((w,i)=>{
+      const wheelInfo=this.physics.vehicle.wheelInfos[i],t=wheelInfo.worldTransform;
+      w.position.copy(t.position as any);w.quaternion.copy(t.quaternion as any);
+      if(isKart){
+        // Cannon composes chassis * steering * roll around local axle -X.
+        // Our kart slicks are 2x the physics-wheel radius; their visual
+        // roll angle must therefore be 1/2 of Cannon's cumulative rotation
+        // to match forward travel distance. Post-multiply a local axle
+        // correction so steering, suspension and chassis attitude stay intact.
+        const extraRoll=-wheelInfo.rotation*(1-1/KART_SPEC.wheelVisualScale);
+        this.wheelRollCorrection.setFromAxisAngle(this.wheelRollAxis,extraRoll);
+        w.quaternion.multiply(this.wheelRollCorrection);
+        // Double the visible wheel diameter but also scale axle spacing to
+        // match the body, instead of leaving tyres at the old half-size
+        // offsets. Lift wheel centers around the ground pivot so the larger
+        // rendered rubber stays on the road. No change to Cannon transforms.
+        w.position.x=this.visualGroundPivot.x+
+          (w.position.x-this.visualGroundPivot.x)*kartVisualScale;
+        w.position.z=this.visualGroundPivot.z+
+          (w.position.z-this.visualGroundPivot.z)*kartVisualScale;
+        w.position.y=this.visualGroundPivot.y+
+          (w.position.y-this.visualGroundPivot.y)*KART_SPEC.wheelVisualScale;
+      }
+    });
     if(this.mode==='orbit')this.orbit.update();
     else{
       const q=this.kart.root.quaternion,p=this.kart.root.position;
@@ -391,7 +496,9 @@ export class GameScene {
         // Eye height, downward gaze and a wide lower field keep the real
         // steering wheel, hands and both front tyres visible in the scene.
         const spec=this.physics.profile;
-        this.desired.fromArray(spec.cockpitEye).applyQuaternion(q).add(p);this.target.fromArray(spec.cockpitGaze).applyQuaternion(q).add(p);
+        const eyeScale=this.physics.profile.id==='kart'?KART_SPEC.visualScale:1;
+        this.desired.fromArray(spec.cockpitEye).multiplyScalar(eyeScale).applyQuaternion(q).add(p);
+        this.target.fromArray(spec.cockpitGaze).multiplyScalar(eyeScale).applyQuaternion(q).add(p);
         this.camera.position.copy(this.desired);this.camera.lookAt(this.target);this.camera.fov=Math.max(spec.cockpitFov,Math.min(108,THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(42))/this.camera.aspect))));
       }else{
         this.desired.copy(p).add(new THREE.Vector3(.01,85,30));this.camera.position.lerp(this.desired,1-Math.exp(-dt*4));this.camera.lookAt(p);this.camera.fov=48;

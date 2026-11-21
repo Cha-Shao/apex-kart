@@ -79,7 +79,13 @@ export class KartPhysics {
     this.body.linearDamping=spec.id==='rb20'?.006:.025;
     this.vehicle.wheelInfos.length=0;
     const wheel={radius:spec.wheelRadius,directionLocal:new CANNON.Vec3(0,-1,0),axleLocal:new CANNON.Vec3(-1,0,0),suspensionStiffness:spec.suspensionStiffness,suspensionRestLength:spec.suspensionRestLength,frictionSlip:spec.grip,dampingRelaxation:spec.id==='rb20'?10:5.8,dampingCompression:spec.id==='rb20'?7:4.4,maxSuspensionForce:spec.id==='rb20'?35000:17000,maxSuspensionTravel:spec.suspensionTravel,rollInfluence:.08,customSlidingRotationalSpeed:-25,useCustomSlidingRotationalSpeed:true};
-    for(const [x,z] of [[-spec.frontHalfTrack,spec.frontZ],[spec.frontHalfTrack,spec.frontZ],[-spec.rearHalfTrack,spec.rearZ],[spec.rearHalfTrack,spec.rearZ]])this.vehicle.addWheel({...wheel,chassisConnectionPointLocal:new CANNON.Vec3(x,spec.connectionY,z),isFrontWheel:z<0});
+    for(const [x,z] of [[-spec.frontHalfTrack,spec.frontZ],[spec.frontHalfTrack,spec.frontZ],[-spec.rearHalfTrack,spec.rearZ],[spec.rearHalfTrack,spec.rearZ]]){
+      const isFrontWheel=z<0;
+      // Different front/rear radii for 10-inch / 11-inch kart slicks.
+      // Keep the RB20's original uniform wheel radius unchanged.
+      const radius=(isFrontWheel?spec.frontWheelRadius:spec.rearWheelRadius)??spec.wheelRadius;
+      this.vehicle.addWheel({...wheel,radius,chassisConnectionPointLocal:new CANNON.Vec3(x,spec.connectionY,z),isFrontWheel});
+    }
     // Cannon defaults to twice the longitudinal friction allowance. Use a
     // physical friction circle shared by braking and cornering instead.
     for(const wheel of this.vehicle.wheelInfos)wheel.forwardAcceleration=.5;

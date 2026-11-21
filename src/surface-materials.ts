@@ -234,7 +234,12 @@ export function asphaltAggregateTexture(){
  * lighter runoff (-1), with zero reserved for kerbs and gravel. */
 export function roadsideMaterial(source:THREE.MeshStandardMaterial,surface:'grass'|'grass-fringe'|'asphalt'|'runoff'|'gravel'='grass'){
   const asphalt=surface==='asphalt'||surface==='runoff',fringe=surface==='grass-fringe',material=source.clone();material.name=asphalt?`irregular-${surface}-fringe`:surface==='gravel'?'loose-gravel-spill':fringe?'grass-overhanging-paved-edge':'worn-grass-verge';
-  material.transparent=true;material.depthTest=true;material.depthWrite=false;material.depthFunc=THREE.LessDepth;material.polygonOffset=false;
+  material.transparent=true;material.depthTest=true;material.depthWrite=false;
+  // Gravel grains are a coplanar decal above both asphalt and gravel. Allow
+  // an equal-depth fragment and bias it toward the camera so the paved depth
+  // prepass cannot erase the transition at grazing camera angles.
+  material.depthFunc=surface==='gravel'?THREE.LessEqualDepth:THREE.LessDepth;
+  material.polygonOffset=surface==='gravel';material.polygonOffsetFactor=surface==='gravel'?-1:0;material.polygonOffsetUnits=surface==='gravel'?-2:0;
   material.onBeforeCompile=(shader,renderer)=>{
     source.onBeforeCompile(shader,renderer);
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>\nattribute vec2 verge;varying vec2 vVerge;${fringe?'\nattribute float vergeGrass;varying float vVergeGrass;':''}`).replace('#include <begin_vertex>',`#include <begin_vertex>\nvVerge=verge;${fringe?'\nvVergeGrass=vergeGrass;':''}`);
@@ -254,8 +259,12 @@ export function roadsideMaterial(source:THREE.MeshStandardMaterial,surface:'gras
         #include <alphatest_fragment>
       `:surface==='gravel'?`
         vec2 vergeWorld=vMapUv*${GRAVEL_TEXTURE_METRES.toFixed(4)};
-        float gravelReach=.12+surfaceNoise(vergeWorld*3.0)*.2;
+        // Restore a visible stone-to-tarmac material transition across
+        // the true gravel polygon perimeter, not a hard half-metre strip.
+        // 0 is the polygon edge, negative values are inside gravel.
+        float gravelReach=.55+surfaceNoise(vergeWorld*2.1+13.0)*.33;
         float gravelFade=1.0-smoothstep(0.0,gravelReach,vVerge.x);
+        float gravelDust=1.0-smoothstep(-.16,.32,vVerge.x);
         // Packed height follows the very same stone footprints as the colour
         // and normals, so the spill consists of grains rather than a flat band.
         float gravelHeight=surfaceSample(normalMap,vNormalMapUv).a;
@@ -263,9 +272,14 @@ export function roadsideMaterial(source:THREE.MeshStandardMaterial,surface:'gras
         float gravelPatch=.35+.65*smoothstep(.27,.68,surfaceNoise(vergeWorld*17.0+13.0));
         float gravelPixel=max(length(dFdx(vergeWorld)),length(dFdy(vergeWorld)));
         float gravelDetail=1.0-smoothstep(.003,.02,gravelPixel);
-        float gravelScatter=mix(.12,gravelStone*gravelPatch,gravelDetail)*gravelFade*gravelFade;
-        float gravelBed=1.0-smoothstep(-.025,.006,vVerge.x);
-        diffuseColor.a*=max(gravelBed,gravelScatter);
+        // Packed sand and isolated stone chips have different fade lengths;
+        // combine their alphas to avoid a perfectly sharp colour junction.
+        float gravelScatter=mix(.42,gravelStone*gravelPatch,gravelDetail)*gravelFade;
+        float gravelBed=1.0-smoothstep(-.16,.04,vVerge.x);
+        float gravelSand=gravelDust*(.50+.25*surfaceNoise(vergeWorld*9.0+7.0));
+        // Finer chips remain across the asphalt-facing side; avoid a faint
+        // transition that visually disappears at track-camera scale.
+        diffuseColor.a*=clamp(max(gravelBed,gravelSand+gravelScatter*.88),0.0,1.0);
         if(diffuseColor.a<.001)discard;
         #include <alphatest_fragment>
       `:asphalt?`
@@ -290,7 +304,7 @@ export function roadsideMaterial(source:THREE.MeshStandardMaterial,surface:'gras
         #include <alphatest_fragment>
       `);
   };
-  material.customProgramCacheKey=()=>`${source.customProgramCacheKey()}-roadside-v3-${surface}`;return material;
+  material.customProgramCacheKey=()=>`${source.customProgramCacheKey()}-roadside-v5-${surface}`;return material;
 }
 
 export const GRAVEL_TEXTURE_METRES=.6;
@@ -511,8 +525,11 @@ export function paintedSurface(material:THREE.MeshStandardMaterial){
 }
 
 /** Smooth tyre shoulders and moulding rings, with the axle on local X. */
-export function tyreGeometry(radius:number,width:number){
-  const profile=[[.62,-.5],[.77,-.5],[.78,-.505],[.79,-.5],[.87,-.49],[.94,-.45],[.985,-.34],[1,-.18],[1,.18],[.985,.34],[.94,.45],[.87,.49],[.79,.5],[.78,.505],[.77,.5],[.62,.5]];
+export function tyreGeometry(radius:number,width:number,rimRadius?:number){
+  // Optional measured rim size lets the kart's 5-inch wheels meet both tyre
+  // sidewalls precisely. Leave the existing F1 profile unchanged if omitted.
+  const rim=rimRadius===undefined?.62:Math.max(.3,Math.min(.68,rimRadius/radius));
+  const profile=[[rim,-.5],[rim+.15,-.5],[rim+.16,-.505],[rim+.17,-.5],[.87,-.49],[.94,-.45],[.985,-.34],[1,-.18],[1,.18],[.985,.34],[.94,.45],[.87,.49],[rim+.17,.5],[rim+.16,.505],[rim+.15,.5],[rim,.5]];
   const geometry=new THREE.LatheGeometry(profile.map(([r,y])=>new THREE.Vector2(r*radius,y*width)),80);
   geometry.rotateZ(Math.PI/2);return geometry;
 }
